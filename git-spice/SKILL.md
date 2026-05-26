@@ -59,9 +59,17 @@ gs ll 2>&1 | head -40                 # commits per branch if more detail needed
 ```
 
 From `gs ls` you can tell:
-- Whether the current branch is tracked.
+- Whether the current branch is tracked. (If it isn't, `gs ls` shows some *other* branch's stack, not yours — a tracked branch off `master` won't appear until you `gs btr --base=<base>` it.)
 - Which branch is the base of the current one.
 - Whether the stack is out of date with trunk (look for the `(needs restack)` marker).
+
+Also read the repo's git-spice config once — it changes `gs` behaviour and what you must NOT re-specify:
+
+```bash
+git config --get-regexp '^spice\.' 2>&1   # prefix, draft default, assignees, PR template
+```
+
+Keys that matter: `spice.branchCreate.prefix` (auto-prepended to new branch names — see §2), `spice.submit.draft` (PRs default to draft), `spice.submit.assignees`, `spice.submit.template` (PR body template).
 
 ### 2. Create a new branch on top of the stack
 
@@ -75,20 +83,44 @@ gs bc --no-commit <branch-name>        # no commit (will create empty commit if 
 
 If the user wants the new branch *below* or *inserted into* the stack, use `--below` or `--insert`. If unsure which, ask once.
 
+**Caveat — branch-name prefix.** If `spice.branchCreate.prefix` is set (this repo uses `amit/`), `gs bc` *prepends it automatically*. Pass only the suffix: `gs bc 2026-05-26-foo` → `amit/2026-05-26-foo`. Passing the full `amit/2026-05-26-foo` produces a doubled `amit/amit/...`. If you double it by accident, fix with `gs branch rename <correct-suffix>` (also takes just the suffix).
+
 ### 3. Submitting / pushing the stack
 
-**Never use `git push` for a stack-tracked branch.** Use git-spice instead:
+**Never use `git push` for a stack-tracked branch.** Use git-spice instead.
+
+**Pick the submit scope deliberately — this bit me on first use:**
+
+- `gs branch submit` — submit **only the current branch**. Use this when the branches *below* already have their own PRs (especially PRs created outside git-spice), or when any lower branch shows `(needs restack)`. It does not touch or restack anything below.
+- `gs ss` (`gs stack submit`) — submit the **whole stack**. Convenient, but two sharp edges:
+  - It **refuses entirely** if *any* branch in the stack shows `(needs restack)` — `FTL gs: refusing to submit outdated branch`. It will not just submit the clean branches; you'd have to restack the offending lower branch first (which force-pushes that branch's PR).
+  - For lower branches it **adopts** any existing PR — including ones created outside git-spice — and may modify it (add a stack-navigation comment, change base, force-push if restacked). Run `gh pr list` first so you know what you'd be disturbing.
+
+  **Do not blindly default to `gs ss`.** If the ask is "make a PR for this new top branch" and the branches below are already-submitted / someone else's / not-restacked, use `gs branch submit` and say so.
 
 ```bash
-gs ss                # default: submit whole stack
-gs ss --fill         # fill PR title/body from commit messages
-gs ss --draft        # mark as draft
-gs ss -u             # only update existing CRs, don't create new ones
-gs ss --dry-run      # preview what would be pushed
-gs uss               # submit current branch + above only (useful when bottom is already merged)
+gs branch submit --fill --no-prompt   # create/update PR for just this branch, non-interactive
+gs branch submit --dry-run            # preview (prints "WOULD create a CR for ...")
+gs ss --dry-run                        # preview whole-stack submit (also surfaces needs-restack refusals)
+gs ss -u                               # update existing CRs only, don't create new ones
+gs uss                                 # current branch + above only (useful when bottom is already merged)
 ```
 
-If the user says "push my branch", and the branch is tracked by gs, run `gs branch submit` (no short alias they use — call it explicitly) or `gs ss` depending on whether they mean just-this-branch or the full stack. If unclear, default to `gs ss` and tell them.
+**Always set a meaningful PR title and body — git-spice does NOT write a description.** `--fill` just copies the commit: first line → title, rest → body. That is rarely a good PR description. After submitting, edit it:
+
+```bash
+gh pr edit <num> --title "..." --body "$(cat <<'EOF'
+## What
+<one-paragraph summary of the user-visible change>
+## Why / root cause
+<the actual cause, not the symptom>
+## Testing
+<how it was verified — tests added, manual repro, etc.>
+EOF
+)"
+```
+
+If `spice.submit.template` is configured, fill *that* template's sections rather than dumping the raw commit message. git-spice applies `spice.submit.draft` and `spice.submit.assignees` from config automatically, but it never adds **labels** or other repo-required metadata — add those yourself (`gh pr edit --add-label ...`) and check the repo's own AGENTS/CLAUDE.md for PR conventions (title prefix, draft, labels).
 
 ### 4. Sync with trunk
 
