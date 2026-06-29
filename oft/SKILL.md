@@ -18,25 +18,31 @@ The user may provide an optional date argument: `$ARGUMENTS`
 
 ## Steps
 
-### 1. Determine the target date FIRST
+### 1. Determine the target date(s) FIRST
 
-**CRITICAL: Calculate the target date before doing anything else.**
+**CRITICAL: Calculate the target date(s) before doing anything else.**
 
-Use the `date` command to get both the ISO date (for API queries) and the formatted date (for the header):
+Use the `date` command to get the ISO date(s) for API queries, and derive a **header label** based on which day(s) are covered.
 
 ```bash
 # For "yesterday":
-TARGET_ISO=$(date -v-1d +"%Y-%m-%d")                    # e.g., "2026-01-29"
-TARGET_DISPLAY=$(LC_TIME=en_US.UTF-8 date -v-1d +"%a %b %-d")  # e.g., "Thu Jan 29"
+TARGET_ISO=$(date -v-1d +"%Y-%m-%d")        # e.g., "2026-01-29"
 
 # For "today" (default):
 TARGET_ISO=$(date +"%Y-%m-%d")
-TARGET_DISPLAY=$(LC_TIME=en_US.UTF-8 date +"%a %b %-d")
 
 # For "last friday" or other dates, calculate accordingly
 ```
 
-**The header "Out for today (Wed Jan 29):" must show the TARGET date, NOT the current date.**
+**Header label rules** (use these — do NOT include a date in parentheses):
+- Target is today → `Out for today:`
+- Target is yesterday → `Out for yesterday:`
+- Target is any other single past day → use that day's name, e.g. `Out for Friday:`
+- Target is a range of days → list day names joined with `&`, e.g. `Out for Tuesday & Wednesday:` (for a 2-day range), `Out for Monday, Tuesday & Wednesday:` (for 3+ days)
+
+Compute the day name with `LC_TIME=en_US.UTF-8 date -j -f "%Y-%m-%d" "$TARGET_ISO" +"%A"` (e.g., "Friday").
+
+**The header must reflect the TARGET day(s), not the current day.**
 
 ### 2. Gather GitHub PR activity
 
@@ -67,7 +73,7 @@ TARGET_DISPLAY=$(LC_TIME=en_US.UTF-8 date +"%a %b %-d")
 
 - Use `rich_text` blocks with `rich_text_list` for proper native bullet formatting
 - Use `indent: 0` for top-level bullets, `indent: 1` for nested bullets
-- **Use TARGET_DISPLAY in the header**, e.g., "Out for today (Wed Jan 29):"
+- **Use the header label from step 1** (e.g., "Out for today:", "Out for yesterday:", "Out for Friday:", "Out for Tuesday & Wednesday:") — do NOT append a date in parentheses
 - See format section below
 
 ### 5. Post to personal DM using Slack API
@@ -78,26 +84,23 @@ TARGET_DISPLAY=$(LC_TIME=en_US.UTF-8 date +"%a %b %-d")
 
 ## Output Format (Slack Block Kit)
 
-Use a single unified bullet list (no separate GitHub/Slack sections). Each item is a top-level bullet with optional nested bullets for details.
+Use a single unified bullet list (no separate GitHub/Slack sections). Each item is a **single, high-level top-level bullet** — one short line that captures the gist of the work, with the PR link at the end for anyone who wants the full detail. Do NOT add nested detail bullets for PRs; the reader is meant to skim the list for an overall understanding and click through to the PR for specifics.
+
+**Keep each bullet to one plain-language sentence.** Describe the broad outcome ("Fixed a flaky layout test", "Added an OOM placeholder for failed page renders"), not the mechanism, root cause, file names, or implementation steps. Drop the "why" and "how" — that lives in the PR. Avoid code identifiers unless one is genuinely the clearest way to name the thing; prefer everyday words.
 
 Example rendered output:
 ```
-Out for today (Thu Jan 29):
+Out for today:
 
-• Fixed login redirect infinite loop when session expired #456
+• Fixed the login redirect loop on expired sessions #456
 • Added database connection pooling #789
 • Started work on user authentication #123 RTR
-    • Implementing OAuth2 login flow for the mobile app
-• Continued refactoring `PaymentProcessor` class #101
-    • Addressed review feedback
-• Reviewed memory management approach (thread)
-    • Suggested `clearPageCache` as interim solution
-    • Questioned if memory budgets are too conservative
-• Investigated customer form filling issue (thread)
-    • Tested back to v10.7 - confirmed feature request, not regression
+• Refactored the payment processing flow #101
+• Reviewed the memory management approach (thread)
+• Investigated a customer form filling issue (thread)
 ```
 
-Note: Code identifiers like `clearPageCache` and `PaymentProcessor` should be rendered as inline code in Slack.
+Note: a code identifier may be rendered as inline code in Slack when used, but prefer plain language over identifiers for these high-level summaries.
 
 Example Block Kit JSON structure:
 ```json
@@ -110,7 +113,7 @@ Example Block Kit JSON structure:
         {
           "type": "rich_text_section",
           "elements": [
-            {"type": "text", "text": "Out for today (Thu Jan 29):", "style": {"bold": true}}
+            {"type": "text", "text": "Out for today:", "style": {"bold": true}}
           ]
         },
         {
@@ -141,13 +144,13 @@ Example Block Kit JSON structure:
       ]
     }
   ],
-  "text": "Out for today (Thu Jan 29)"
+  "text": "Out for today"
 }
 ```
 
 **Key Block Kit patterns:**
-- Start new `rich_text_list` with `indent: 0` for top-level PR bullets
-- Immediately follow with `rich_text_list` with `indent: 1` for nested detail bullets
+- Use a single `rich_text_list` with `indent: 0` for the PR bullets — keep them flat, one line each
+- Do NOT add `indent: 1` nested detail bullets for PRs (the PR link carries the detail). Nested bullets are reserved for Slack discussion items only.
 - No emoji prefixes for PRs
 - PR link goes at the **end** of the line, formatted as `{"type": "link", "url": "...", "text": "#123"}` (just the number, no "PR" prefix)
 - For non-draft PRs (ready to review), add `{"type": "text", "text": "RTR", "style": {"bold": true}}` after the PR link
@@ -161,10 +164,11 @@ Example Block Kit JSON structure:
 ## Guidelines
 
 ### Date handling:
-- **ALWAYS calculate the target date first** using the `date` command
-- **The header date must be the TARGET date**, not today's date
-- If argument is "yesterday" and today is Thu Jan 30, the header should say "Wed Jan 29"
-- Double-check the day of week matches the date
+- **ALWAYS calculate the target date(s) first** using the `date` command
+- **The header label must reflect the TARGET day(s)**, not today
+- Use `today` / `yesterday` for those two cases; otherwise use the day-of-week name (e.g. `Friday`)
+- For multi-day ranges, join day names with `&` (e.g. `Tuesday & Wednesday`); use commas + `&` for 3+ days (e.g. `Monday, Tuesday & Wednesday`)
+- Do NOT include a date in parentheses in the header
 
 ### PR items:
 - **Only include PRs where you authored commits that day** - skip PRs where the only activity was merging (no new changes)
@@ -172,14 +176,16 @@ Example Block Kit JSON structure:
 - **Check draft status** - if PR has `draft: false` (ready to review), add **RTR** in bold after the PR link
 - PR number link goes at the **end** of the line, formatted as `#1234` (no "PR" prefix)
 - NO repo name in brackets - keep it clean
-- **Phrase as accomplishments, not PR titles.** Use commit messages and PR changes to describe what was actually done:
-  - "Playground example file picker" → "Added file picker to the playground example"
-  - "Remove Annotation editing toolbar" → "Started work on removing the annotation editing toolbar"
-  - "Fix eraser tool issues" → "Fixed eraser tool zoom detection and line smoothing issues"
+- **Keep it high-level and simple — one short line per PR.** The goal is an at-a-glance overview of the broader task, not a detailed account. The PR link is there for anyone who wants specifics, so don't reproduce them in the summary.
+- **Phrase as a broad accomplishment, not the PR title or the mechanism.** Use commit messages and PR changes to understand what was done, then describe the outcome plainly:
+  - "Playground example file picker" → "Added a file picker to the playground example"
+  - "Remove Annotation editing toolbar" → "Started removing the annotation editing toolbar"
+  - "Fix eraser tool zoom detection and line smoothing in stroke buffer" → "Fixed a couple of eraser tool issues"
   - Use verbs like: Fixed, Added, Started, Continued, Finished, Implemented, Refactored
+- **Do NOT include** root-cause explanations, the fix mechanism, file/class/function names, repro steps, or "why" clauses — drop all of that and let the PR carry it.
 - **Check commits** to understand the actual work done that day, not just the PR title
 - Action description on main bullet, with PR link at end of line
-- Add nested bullets for details when useful (based on commits/changes)
+- **No nested detail bullets for PRs** — keep the list flat
 
 ### Slack discussion items:
 - **Fetch ALL messages** (use count=100 in API call) - the CLI only returns 20
