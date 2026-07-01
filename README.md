@@ -15,6 +15,7 @@ Personal agent skills and command wrappers.
 - `grill-me`
 - `handoff`
 - `oft`
+- `pr-private-review`
 - `retrace`
 - `session-report`
 - `share`
