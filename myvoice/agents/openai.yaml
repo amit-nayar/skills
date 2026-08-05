@@ -1,0 +1,4 @@
+interface:
+  display_name: "My Voice"
+  short_description: "Draft technical writing in Amit’s preferred voice"
+  default_prompt: "Use $myvoice to rewrite this PR description in my preferred voice."
