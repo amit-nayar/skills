@@ -21,11 +21,11 @@ clearly marked as an unreviewed machine suggestion.
   unverified by a person. The comment says so at the top, and each proposal is labelled
   `Suggested fix` / `Suggested priority`. An engineer reviews before anything is acted on.
 - **Oldest pain first** — something stuck in triage for three weeks matters more than yesterday's report.
-- **Customer signal wins** — an issue with Zendesk tickets behind it outranks one without.
+- **Customer signal wins** — an issue with a linked support ticket or `customerNeeds` outranks one
+  without. The link itself is the signal; the ticket is never opened.
 - **Silence when clean** — an empty queue posts nothing at all.
 - **One comment, no field changes** — the only write this skill ever makes is a research comment.
-  It never sets status, priority, assignee or labels, and never writes to Zendesk. It proposes;
-  humans decide.
+  It never sets status, priority, assignee or labels. It proposes; humans decide.
 - **Comment once per issue** — a weekly run must not re-comment on an issue it already covered.
 
 ## Arguments
@@ -96,11 +96,9 @@ From the response take:
 - **Time in triage** — from `stateHistory`, the entry whose `state.name` is `Triage` and whose
   `endedAt` is `null`; the age is now minus its `startedAt`. Fall back to `createdAt` only if no
   such entry exists.
-- **Customer pressure** — count `attachments` whose `url` contains `zendesk.com/tickets/`, plus
-  any `customerNeeds`. Note the organisation names when the needs carry them.
-  Match on `zendesk.com/tickets/`, **not** on a subdomain: live attachments use the legacy
-  `pspdfkit.zendesk.com` host, while the REST API in step 4a answers on `nutrient.zendesk.com`.
-  Both are the same instance, and filtering on either subdomain silently finds zero tickets.
+- **Customer pressure** — count `attachments` whose `url` contains `zendesk.com/tickets/`, plus any
+  `customerNeeds`, and note the organisation names when the needs carry them. This is Linear
+  metadata: counting and naming a linked ticket is fine, **opening it is not** (see step 4a).
 - **Existing comments** — call `mcp__claude_ai_Linear__list_comments` for the issue **now**, not
   later. It serves two purposes and both matter:
   1. **Research input.** A colleague may already have tested the thing you are about to hypothesise
@@ -110,15 +108,6 @@ From the response take:
   2. **The dedup marker** for step 7 (`<!-- android-triage-report -->`).
   Also note any **human triage decision** already recorded ("deferring to backlog", "not
   reproducible"). Never re-litigate one: acknowledge it and scope the research around it.
-- **Zendesk ticket IDs** — from those same attachment URLs (`/tickets/<id>`), plus any
-  `zendesk-<id>` labels, plus any `zendesk.com/.../tickets/<id>` URL in the **description**.
-  Keep them; step 4 needs them.
-  Description-only tickets are common when a person writes the issue by hand rather than the
-  Zendesk integration creating it. They do **not** count toward the bullet's
-  `N customer ticket(s)` — that number reflects linked attachments and `customerNeeds`, which is
-  what makes it comparable week to week — but they are real customer signal, so name the customer
-  in the reply's `Support` line and say the ticket was not linked.
-
 Do **not** substitute `createdAt` for triage age in general: a migrated issue created in 2025 may
 have entered triage last week, and reporting it as "400d in triage" is wrong.
 
@@ -131,21 +120,18 @@ comments (see "When research can't be done").
 
 Run these four passes per issue. Each maps to one labelled line in the comment.
 
-**a. Support context.** Re-read the description and the comments already fetched in step 3 —
-weigh a colleague's first-hand testing above anything you infer from the code. For each Zendesk
-ticket found in step 3, pull subject, status, tags and the latest comments:
+**a. Support context — from the issue only.** Re-read the description and the comments fetched in
+step 3. Weigh a colleague's first-hand testing above anything inferred from the code.
 
-```bash
-set -a && . ~/.zprofile >/dev/null 2>&1; set +a
-curl --silent --request GET \
-  "https://nutrient.zendesk.com/api/v2/tickets/<id>.json" \
-  --user "${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}"
-```
+**Do not open a linked support ticket, and do not call the Zendesk API.** The Linear issue is the
+only source of report context. Whoever files the issue is responsible for putting the reproduction
+detail in it, so an issue that cannot be triaged from its own contents is an incomplete issue — and
+the useful response is to say so, not to reconstruct the context from another system. Reconstructing
+it hides the gap and the next report arrives just as thin.
 
-The `zd` CLI is **not installed on this host** (that is what AND-1937 is about) — go straight to
-the REST API above, don't try `zd` and don't treat its absence as a blocker. Report only facts
-that change a triage decision, and only facts **not already on the issue** — the reader has the
-issue open in the next tab.
+Report only facts the issue records, and only ones **not already obvious from it** — the reader has
+the issue open in the next tab. Naming the customer and ticket number from Linear's own metadata is
+fine; describing the ticket's contents is not.
 
 **b. Duplicate check.** Search with `mcp__claude_ai_Linear__list_issues` using normalized title
 keywords via `query`. Search the **whole workspace**, not just Android: the same defect is often
@@ -165,9 +151,12 @@ the minimal fix leaves structural risk, and name what could break. Suggest a pri
 breadth and severity — confirmed multi-customer impact, a regression in a stable path, data loss
 or crashes — not from customer insistence or from how many duplicates you found.
 
-**When the evidence doesn't support a conclusion, say so.** `Needs info: exact device + SDK
-version, and whether it reproduces on a non-rotated document` is a useful comment. An invented
-root cause is not. Never present a hypothesis as a finding.
+**When the issue doesn't carry enough to reach a conclusion, that is the finding.** Say exactly
+what is missing and leave the issue in `Triage` — this skill never changes status anyway, so the
+point is to make the gap explicit rather than to paper over it. `Needs info: exact device + SDK
+version, and whether it reproduces on a non-rotated document` is a useful comment; an invented root
+cause is not. Look for: affected version, platform and device, exact steps, expected versus actual,
+frequency, and logs or screenshots. Never present a hypothesis as a finding.
 
 ### 5. Order the list
 
@@ -307,12 +296,13 @@ Block Kit shape:
 Still post the Slack bullet, and still comment — with the gap stated instead of omitted:
 
 ```md
-**Needs info:** no Zendesk ticket and no repro steps on the issue — which app surface, which SDK
-version, and does the author id appear in the raw Instant payload?
+**Needs info:** no repro steps on the issue and no linked customer ticket — which app surface,
+which SDK version, and does the author id appear in the raw Instant payload? Leaving this in
+`Triage` until that lands.
 ```
 
-If a whole data source is down — Zendesk unreachable, monorepo checkout missing — say that once, in
-plain words, in the affected line (`**Code:** not investigated — monorepo checkout unavailable this
+If a data source is down — Linear degraded, monorepo checkout missing — say that once, in plain
+words, in the affected line (`**Code:** not investigated — monorepo checkout unavailable this
 run.`). Never post a comment whose labels are present but empty, and never let a source outage
 silently turn into "nothing found".
 
@@ -359,9 +349,10 @@ the marker would then block the useful comment a later run could have made.
 11. **DON'T use `createdAt` as triage age** — migrated issues predate their triage entry by months.
 12. **DON'T skip the 6-day dedup check** — the wake-up catch-up can fire this twice in a week.
 13. **DON'T filter by status name `"Triage"`** — filter by the `triage` type.
-14. **DON'T write to Zendesk** — it is read-only here, always.
-15. **DON'T try the `zd` CLI** — not installed here. Zendesk REST with `ZENDESK_EMAIL` /
-    `ZENDESK_TOKEN`, per step 4a.
+14. **DON'T report support detail the issue doesn't record** — `Needs info` instead.
+15. **DON'T touch Zendesk at all** — no API call, no CLI, no ticket URL fetch. The Linear issue is
+    the only source of report context; a thin issue gets a `Needs info` comment, not an
+    investigation in another system.
 16. **DON'T present a hypothesis as a root cause** — `Needs info` is a valid, useful answer.
 17. **DON'T research before reading the issue's comments** — the answer, or the disproof of your
     answer, is often already there.

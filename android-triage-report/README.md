@@ -14,8 +14,7 @@ launchd (Mon 08:55)
     → run-claude-routine.sh android-triage-report
       → claude -p /android-triage-report   (opus-5, 100 turns, cwd = ~/dev/nutrient/monorepo)
         → SKILL.md
-          → Linear (read + ONE comment per issue) · Zendesk REST (read)
-            · monorepo (read) · Slack (post)
+          → Linear (read + ONE comment per issue) · monorepo (read) · Slack (post)
 ```
 
 | Piece | Lives at | Tracked in |
@@ -77,7 +76,7 @@ A dry run is the right way to check the research depth before it lands on custom
 ## Things that will bite you
 
 - **One comment is the entire write surface.** The report proposes a priority; it never sets one,
-  and it never touches status, assignee or labels. Zendesk stays read-only.
+  and it never touches status, assignee or labels.
 - **Comments are deduped by a marker, not by date.** Each comment starts with
   `<!-- android-triage-report -->`; the skill skips any issue that already has one. Without that,
   a slow-moving queue collects one comment per issue per week. A previous comment is never edited
@@ -90,10 +89,13 @@ A dry run is the right way to check the research depth before it lands on custom
   confidently wrong conclusion on AND-1982.
 - **Unfurling must be off.** The bullets are full of `linear.app` links, and the Linear Slack app
   answers each one with its own blank message. `unfurl_links: false` + `unfurl_media: false`.
-- **Two Zendesk hostnames, one instance.** Attachments use `pspdfkit.zendesk.com`; the REST API
-  answers on `nutrient.zendesk.com`. Filter on `zendesk.com/tickets/`, never a subdomain.
-- **`zd` CLI is not installed** (that is what AND-1937 is about). Use Zendesk REST with
-  `ZENDESK_EMAIL` / `ZENDESK_TOKEN`.
+- **The Linear issue is the only source of report context.** No Zendesk, no other ticket system —
+  no API call, no CLI, no fetching a linked ticket URL. A linked ticket is counted and named from
+  Linear's own metadata as customer signal, and left unopened.
+  This is deliberate. Whoever files the issue owns putting the reproduction detail in it, so an
+  issue that can't be triaged from its own contents is an incomplete issue. Reconstructing the
+  context from elsewhere hides that, and the next report arrives just as thin — so a thin issue gets
+  a `Needs info` comment naming exactly what's missing, and stays in `Triage`.
 - **`SLACK_API_TOKEN_OFT` comes from `~/.zprofile`**, which a non-login shell does not inherit —
   `set -a && . ~/.zprofile >/dev/null 2>&1; set +a` first.
 - **Empty queue posts nothing** and exits 0. A non-zero exit tells the runner it failed, and it
