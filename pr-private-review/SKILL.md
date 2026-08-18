@@ -61,10 +61,11 @@ After checkout, confirm the working tree is still clean.
 Read enough to understand the change and its motivation properly:
 
 1. Read the PR description.
-2. Read any linked Jira issues. Search the PR title, body, and branch name for Jira keys like `ABC-123`. For each unique key found, fetch the issue (see the Jira API section of the global `~/.claude/CLAUDE.md` — use the `api.atlassian.com` gateway with the cloud ID and `$JIRA_API_TOKEN`), and read its comments when they seem relevant.
-   - If the PR references a Jira issue, reading that issue is **required**. Do not continue without it.
-   - If a Jira fetch fails because of authentication, abort the review immediately and tell the user to fix Jira auth rather than continuing with a partial review.
-   - If the PR references no Jira issue, skip this step — a missing Jira reference is not a reason to abort.
+2. Read any linked tracker issues. Search the PR title, body, and branch name for issue keys like `AND-123`, and fetch each unique key with the Linear MCP tools (`get_issue`, plus `list_comments` when the discussion looks relevant).
+   - If the PR references an issue, reading it is **required**. Do not continue without it.
+   - Older PRs may reference **Jira** keys instead (`ANDR-`, `CORE-`, `IOS-`, `SERVER-`). Jira is read-only historical now, so treat these as best-effort: prefer finding the migrated Linear issue, and if you cannot, note that the original context was unavailable and carry on. **Never abort a review because a tracker lookup failed** — a partial-context review is far more useful than none.
+   - Jira project keys do not map mechanically onto Linear ones, and issue numbers were not always preserved. **Do not translate a key by hand** — search Linear for the issue whose attachments include `https://nutrient.atlassian.net/browse/<OLD-KEY>`; the migration created those backlinks and they still resolve. Teams are also still being renamed, and an old key keeps resolving as an alias after a rename, so a key that works proves nothing about which one is current. The team-key table in the global `~/.claude/CLAUDE.md` is the source of truth and is explicitly a dated snapshot — read it there rather than copying it here, where it would go stale unnoticed.
+   - If the PR references no issue at all, skip this step — that is not a reason to abort.
 3. Read the diff:
    ```bash
    gh pr diff <number>
