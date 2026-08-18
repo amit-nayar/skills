@@ -43,6 +43,10 @@ The user's most-used aliases (and the long forms they expand to):
 | `gs ls`    | `gs log short`              | Show the current stack |
 | `gs ll`    | `gs log long`               | Show stack with commits |
 | `gs u` / `gs d` / `gs U` / `gs D` | navigation | up / down / top / bottom of stack |
+| `gs rbc`   | `gs rebase continue`        | Continue a git-spice-orchestrated rebase/restack after resolving a conflict |
+| `gs rba`   | `gs rebase abort`           | Abort a git-spice-orchestrated rebase/restack |
+
+**Aliases are derived, not arbitrary** — `gs --help` states the rule directly: combine the first letter of each word in the command path (`gs bc` = `branch create`, `gs cc` = `commit create`, `gs rbc` = `rebase continue`). If an alias shows up that isn't in the table above, don't guess or ask the user what it means — run `gs --help` (lists every command group with its own short letter, e.g. `rebase (rb) continue (c)`) and decode it from there.
 
 Always pass `--no-prompt` to anything that might prompt unless an interactive editor is genuinely needed. The user does NOT want to be dropped into an editor mid-task.
 
@@ -89,14 +93,24 @@ If the user wants the new branch *below* or *inserted into* the stack, use `--be
 
 **Never use `git push` for a stack-tracked branch.** Use git-spice instead.
 
-**Pick the submit scope deliberately — this bit me on first use:**
+**Prefer `gs ss` (stack submit) over `gs branch submit` whenever the whole stack is yours and clean.** Only `gs ss`/`gs uss` (stack-aware submits) post and keep updated the **stack-navigation comment** on every PR in the stack — a checklist linking all the PRs with `◀` marking which one you're looking at, e.g.:
 
-- `gs branch submit` — submit **only the current branch**. Use this when the branches *below* already have their own PRs (especially PRs created outside git-spice), or when any lower branch shows `(needs restack)`. It does not touch or restack anything below.
-- `gs ss` (`gs stack submit`) — submit the **whole stack**. Convenient, but two sharp edges:
+> This change is part of the following stack:
+> - #56924
+>     - #57216 ◀
+
+`gs branch submit` submits in isolation and never writes this comment, even if the branch is part of a tracked stack — reviewers landing on a mid-stack PR lose the links to the rest. See https://github.com/PSPDFKit/PSPDFKit/pull/57216#issuecomment-5314014804 for a real example.
+
+**That said, pick the scope deliberately — this bit me on first use:**
+
+- `gs branch submit` — submit **only the current branch**, no navigation comment. Use this when the branches *below* already have their own PRs (especially PRs created outside git-spice), or when any lower branch shows `(needs restack)` (which would make `gs ss` refuse outright).
+- `gs ss` (`gs stack submit`) — submit the **whole stack** and write/refresh the navigation comment on each PR. Two sharp edges:
   - It **refuses entirely** if *any* branch in the stack shows `(needs restack)` — `FTL gs: refusing to submit outdated branch`. It will not just submit the clean branches; you'd have to restack the offending lower branch first (which force-pushes that branch's PR).
-  - For lower branches it **adopts** any existing PR — including ones created outside git-spice — and may modify it (add a stack-navigation comment, change base, force-push if restacked). Run `gh pr list` first so you know what you'd be disturbing.
+  - For lower branches it **adopts** any existing PR — including ones created outside git-spice — and may modify it (add/refresh the navigation comment, change base, force-push if restacked). Run `gh pr list` first so you know what you'd be disturbing.
 
-  **Do not blindly default to `gs ss`.** If the ask is "make a PR for this new top branch" and the branches below are already-submitted / someone else's / not-restacked, use `gs branch submit` and say so.
+  **Do not blindly default to `gs ss`** when the ask is "make a PR for this new top branch" and the branches below are someone else's / not-restacked — use `gs branch submit` there and say so.
+
+**Workflow for a new branch on top of your own already-submitted stack:** `gs branch submit` to create the PR quickly is fine, but follow up with one `gs ss` (or `gs uss` if a lower branch isn't yours to touch) afterward so the navigation comment gets added across the stack — don't leave it on `gs branch submit` alone as the final step.
 
 ```bash
 gs branch submit --fill --no-prompt   # create/update PR for just this branch, non-interactive
@@ -152,7 +166,9 @@ After `gs rs`, if the stack still has branches whose base was merged, those bran
 3. After each branch succeeds, the next branch up will have a new "old base" (this branch's new tip). Repeat.
 4. When all branches are clean, run `gs sr --no-prompt` once to let git-spice confirm everything is in sync (this should be a no-op on a clean tree). If gs still wants a rebase, fall back to `gs br --no-prompt` per branch.
 
-**If a `git rebase` step conflicts**, stop and tell the user — do not try to resolve conflicts blindly. They can resolve, then you continue with `git rebase --continue` and the rest of the walk.
+**If a `git rebase` step conflicts**, stop and tell the user — do not try to resolve conflicts blindly. They can resolve, then you continue with `git rebase --continue` and the rest of the walk — plain git is correct here because *you* started this as a plain git rebase, not git-spice.
+
+**This is a different situation from a conflict raised by `gs sr`/`gs br`/`gs usr` themselves.** Those commands can orchestrate a rebase across *multiple* branches in one call; if one of them stops on a conflict, resolve it and continue with `gs rbc` (`gs rebase continue`), not `git rebase --continue` — the plain-git form only finishes the current branch's rebase and leaves git-spice's multi-branch sequence stalled. `gs rba` (`gs rebase abort`) bails out of the whole sequence. `git status` will say "no rebase in progress" once the underlying git rebase is done even if git-spice's orchestration isn't — don't take that as confirmation the restack fully completed; run `gs ls` to check for lingering `(needs restack)` markers instead.
 
 **Why this works for the "base updated with master via a merge commit, not a rebase" case:** `git rebase --onto <new-base> <old-base-sha>` only takes commits *after* `<old-base-sha>` on the current branch, so the merge commit from master is dropped naturally — only the branch's actual work is replayed.
 
