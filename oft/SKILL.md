@@ -24,6 +24,8 @@ The user may provide an optional date argument: `$ARGUMENTS`
 
 - If no argument provided, use **today**
 - If argument provided, interpret it as a natural language date (e.g., "yesterday", "last friday", "2 days ago")
+- Special case: **"last business day"** means yesterday, but rolled back over the weekend — if
+  today is Monday, this means the preceding Friday (not Sunday); otherwise it's the same as "yesterday"
 
 ## Steps
 
@@ -42,6 +44,13 @@ TARGET_ISO=$(date -v-1d +"%Y-%m-%d")        # e.g., "2026-01-29"
 
 # For "today" (default):
 TARGET_ISO=$(date +"%Y-%m-%d")
+
+# For "last business day": yesterday, rolled back over the weekend
+if [ "$(date +%u)" = "1" ]; then
+  TARGET_ISO=$(date -v-3d +"%Y-%m-%d")   # Monday -> preceding Friday
+else
+  TARGET_ISO=$(date -v-1d +"%Y-%m-%d")
+fi
 
 # For "last friday" or other dates, calculate accordingly
 ```
