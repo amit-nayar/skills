@@ -41,6 +41,79 @@ clearly marked as an unreviewed machine suggestion.
   wake-up catch-up from double-posting.
 - nothing — build, post to Slack, and comment on each issue.
 
+## Transport: MCP first, GraphQL when headless
+
+This skill has two ways to reach Linear. **Check which one you have before step 1** — do not
+discover it by watching a tool call fail.
+
+**Interactive runs** use the `mcp__claude_ai_Linear__*` tools named throughout the steps below.
+That is the normal path.
+
+**The scheduled launchd run cannot use them.** `claude -p --dangerously-skip-permissions` does not
+carry the claude.ai connector's interactive OAuth, so the Linear MCP tools are typically absent or
+unauthorized in the Monday 08:55 routine. This is expected, not an outage — **do not report it as
+one, and do not abort.** Fall back to the Linear GraphQL API over `Bash`:
+
+```bash
+set -a && . ~/.zprofile >/dev/null 2>&1; set +a   # $LINEAR_API_KEY is a login-shell var
+```
+
+`$LINEAR_API_KEY` goes in the `Authorization` header **directly, with no `Bearer` prefix**, and
+every response must be piped through `tr -d '\000-\010\013-\037'` before `jq` — Linear's JSON
+carries control characters that make `jq` fail on otherwise-valid data.
+
+Stable ids, verified 2026-08-24:
+
+| | |
+|---|---|
+| Android team key | `AND` (**not** `ANDR` — the rename has not landed for this team) |
+| Android team id | `49ba99f2-5b71-4950-a141-d7d50dad01d6` |
+| `Triage` state id | `0da8027c-a638-4ccd-abcd-bc04bf344495` |
+
+Filter on state **type**, not name or id, for the same reason step 1 does. The team id is only a
+convenience — re-resolve it from the key if the query errors.
+
+### The fallback queries
+
+Step 1 (queue + everything steps 3 and 7a need, in one round trip):
+
+```bash
+curl -s -X POST https://api.linear.app/graphql \
+  -H "Authorization: $LINEAR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"query":"query($t:ID!){ issues(first:100, includeArchived:false, filter:{ team:{id:{eq:$t}}, state:{type:{eq:\"triage\"}} }) { nodes { identifier title url priority createdAt labels{nodes{name}} assignee{name} comments{nodes{id body user{name} createdAt}} attachments{nodes{title url}} } } }","variables":{"t":"49ba99f2-5b71-4950-a141-d7d50dad01d6"}}' \
+  | tr -d '\000-\010\013-\037' | jq .
+```
+
+`includeArchived: false` is load-bearing. With it set to `true` the same query returns six trashed
+`[SPIKE] … safe to delete` issues from the 4–5 Aug label-group probes, which are not triage work.
+
+Step 7 (`commentCreate` is the GraphQL equivalent of `save_comment`; `issueId` is the issue's UUID,
+not its `AND-` key):
+
+```bash
+curl -s -X POST https://api.linear.app/graphql \
+  -H "Authorization: $LINEAR_API_KEY" -H "Content-Type: application/json" \
+  -d "$(jq -n --arg id "$ISSUE_UUID" --arg body "$COMMENT" \
+       '{query:"mutation($id:String!,$body:String!){ commentCreate(input:{issueId:$id, body:$body}) { success comment { id url } } }", variables:{id:$id, body:$body}}')" \
+  | tr -d '\000-\010\013-\037' | jq .
+```
+
+Build the payload with `jq -n`, never by interpolating the markdown body into a shell string — the
+comment contains newlines, backticks and quotes that will otherwise corrupt the JSON.
+
+Everything else is unchanged: same dedup marker, same "never write a field other than a comment"
+rule. `commentCreate` is the **only** mutation this skill may ever call.
+
+### Trusting a zero
+
+An empty result from a hand-written filter is ambiguous — a genuinely clear queue and a typo'd
+filter look identical. Before reporting an empty queue from the GraphQL path, run the same query
+shape once against `state:{type:{eq:"started"}}`; it should return real in-progress work
+(10 issues on 2026-08-24). If it does, the filter syntax is sound and the zero is real.
+
+That is the **whole** check. Do not also probe archived issues, alternative state names, or the
+`ANDR` key — that ground is covered above, and re-deriving it every Monday wastes most of the run.
+
 ## Steps
 
 ### 1. Fetch the triage queue
@@ -57,6 +130,9 @@ mcp__claude_ai_Linear__list_issues
 `Triage` is the Android team's only triage-type status (verified 2026-08-04 — the old `New`
 status no longer exists). Use `state: "triage"` (the type) rather than the name, so a rename
 doesn't silently return zero issues.
+
+If the Linear MCP tools are unavailable, use the GraphQL equivalent from **Transport** above rather
+than reporting the queue as unreadable.
 
 **If the queue is empty: post nothing and stop.** Log that fact for the user and exit 0 — an
 empty run is a success, not a failure.
@@ -214,6 +290,8 @@ mcp__claude_ai_Linear__save_comment
 Check the result. If it fails, keep going with the remaining issues and report which ones failed —
 a missing comment is better than an aborted run.
 
+On the headless path this is `commentCreate` — see **Transport** above.
+
 **Never** call `save_issue`. No status, priority, assignee, label, or description change, ever,
 however obvious the right answer looks. The comment is the entire write surface.
 
@@ -301,8 +379,9 @@ which SDK version, and does the author id appear in the raw Instant payload? Lea
 `Triage` until that lands.
 ```
 
-If a data source is down — Linear degraded, monorepo checkout missing — say that once, in plain
-words, in the affected line (`**Code:** not investigated — monorepo checkout unavailable this
+A missing Linear **MCP** connection is not a data-source outage — it is the expected headless
+state, and **Transport** above says what to do instead. If a data source is genuinely down — Linear
+returning errors, monorepo checkout missing — say that once, in plain words, in the affected line (`**Code:** not investigated — monorepo checkout unavailable this
 run.`). Never post a comment whose labels are present but empty, and never let a source outage
 silently turn into "nothing found".
 
@@ -360,3 +439,8 @@ the marker would then block the useful comment a later run could have made.
     it.
 19. **DON'T exit non-zero on "nothing to report"** — the launchd runner treats non-zero as failure
     and will retry on the next wake.
+20. **DON'T treat a missing Linear MCP connection as a failure** — it is the normal state of the
+    scheduled run. Switch to the GraphQL transport and carry on.
+21. **DON'T re-derive the triage filter every run** — the ids, the state type, and the one
+    `started` sanity check are all in **Transport**. Probing archived issues and alternate team
+    keys to confirm a zero burns most of the run's turns for an answer that is already written down.
