@@ -98,12 +98,15 @@ A dry run is the right way to check the research depth before it lands on custom
   a `Needs info` comment naming exactly what's missing, and stays in `Triage`.
 - **`SLACK_API_TOKEN_OFT` comes from `~/.zprofile`**, which a non-login shell does not inherit —
   `set -a && . ~/.zprofile >/dev/null 2>&1; set +a` first.
-- **The scheduled run reaches Linear over GraphQL, not MCP.** The claude.ai Linear connector is
-  authenticated interactively, so `claude -p --dangerously-skip-permissions` under launchd usually
-  can't use it. That is expected, not an outage: the skill's **Transport** section carries the
-  `$LINEAR_API_KEY` queries, the team and state ids, and the single sanity check that makes an empty
-  queue trustworthy. Before 24 Aug 2026 none of this was written down, and each Monday run
-  rediscovered it from scratch.
+- **The Linear MCP connection is reliable headless, but not guaranteed.** Verified 24 Aug 2026:
+  under `claude -p --dangerously-skip-permissions` with a launchd-like stripped environment all 62
+  `mcp__claude_ai_Linear__*` tools were present. Yet the 24 Aug 08:55 launchd run found the
+  connector unauthorized and fell back to GraphQL, with nothing in the environment or logs
+  explaining the difference — so it's an intermittent connector fault, not a property of headless
+  runs. The skill's **Transport** section carries the `$LINEAR_API_KEY` fallback queries, the team
+  and state ids, and the sanity check that makes an empty queue trustworthy. Before 24 Aug 2026
+  none of it was written down and the fallback run rediscovered it from scratch, which is what the
+  section is really for.
 - **Empty queue posts nothing** and exits 0. A non-zero exit tells the runner it failed, and it
   will retry on the next wake.
 - **`node` is not on launchd's PATH**, so plugin `SessionEnd` hooks fail on every scheduled run.

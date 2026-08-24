@@ -49,10 +49,14 @@ discover it by watching a tool call fail.
 **Interactive runs** use the `mcp__claude_ai_Linear__*` tools named throughout the steps below.
 That is the normal path.
 
-**The scheduled launchd run cannot use them.** `claude -p --dangerously-skip-permissions` does not
-carry the claude.ai connector's interactive OAuth, so the Linear MCP tools are typically absent or
-unauthorized in the Monday 08:55 routine. This is expected, not an outage — **do not report it as
-one, and do not abort.** Fall back to the Linear GraphQL API over `Bash`:
+**The MCP tools usually work headless too** — verified 24 Aug 2026 under `claude -p
+--dangerously-skip-permissions` with a stripped launchd-like environment, where all 62
+`mcp__claude_ai_Linear__*` tools were present. Prefer them whenever they are there.
+
+**But they are not guaranteed.** The 24 Aug 08:55 launchd run found the connector unauthorized and
+had to improvise; nothing in the environment explained it, so treat it as an intermittent
+connector/token failure rather than something you can predict or prevent. When it happens, **do not
+report an outage and do not abort** — fall back to the Linear GraphQL API over `Bash`:
 
 ```bash
 set -a && . ~/.zprofile >/dev/null 2>&1; set +a   # $LINEAR_API_KEY is a login-shell var
@@ -104,12 +108,15 @@ comment contains newlines, backticks and quotes that will otherwise corrupt the 
 Everything else is unchanged: same dedup marker, same "never write a field other than a comment"
 rule. `commentCreate` is the **only** mutation this skill may ever call.
 
+Say which transport you used in the run summary, so a reader can tell an MCP outage from a quiet
+week without digging through the log.
+
 ### Trusting a zero
 
 An empty result from a hand-written filter is ambiguous — a genuinely clear queue and a typo'd
 filter look identical. Before reporting an empty queue from the GraphQL path, run the same query
 shape once against `state:{type:{eq:"started"}}`; it should return real in-progress work
-(10 issues on 2026-08-24). If it does, the filter syntax is sound and the zero is real.
+(10–14 issues through Aug 2026). If it does, the filter syntax is sound and the zero is real.
 
 That is the **whole** check. Do not also probe archived issues, alternative state names, or the
 `ANDR` key — that ground is covered above, and re-deriving it every Monday wastes most of the run.
@@ -379,8 +386,9 @@ which SDK version, and does the author id appear in the raw Instant payload? Lea
 `Triage` until that lands.
 ```
 
-A missing Linear **MCP** connection is not a data-source outage — it is the expected headless
-state, and **Transport** above says what to do instead. If a data source is genuinely down — Linear
+A missing Linear **MCP** connection is not a data-source outage — it is an intermittent fault with
+a documented workaround, and **Transport** above says what to do instead. If a data source is
+genuinely down — Linear
 returning errors, monorepo checkout missing — say that once, in plain words, in the affected line (`**Code:** not investigated — monorepo checkout unavailable this
 run.`). Never post a comment whose labels are present but empty, and never let a source outage
 silently turn into "nothing found".
@@ -439,8 +447,8 @@ the marker would then block the useful comment a later run could have made.
     it.
 19. **DON'T exit non-zero on "nothing to report"** — the launchd runner treats non-zero as failure
     and will retry on the next wake.
-20. **DON'T treat a missing Linear MCP connection as a failure** — it is the normal state of the
-    scheduled run. Switch to the GraphQL transport and carry on.
+20. **DON'T treat a missing Linear MCP connection as a failure** — it is intermittent, not a
+    blocker. Switch to the GraphQL transport, say which one you used, and carry on.
 21. **DON'T re-derive the triage filter every run** — the ids, the state type, and the one
     `started` sanity check are all in **Transport**. Probing archived issues and alternate team
     keys to confirm a zero burns most of the run's turns for an answer that is already written down.
