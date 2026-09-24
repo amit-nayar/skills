@@ -71,7 +71,9 @@ SCRATCH=<the session scratchpad directory>   # all intermediate files go here
 - Any other single day: `Out for Friday:`
 - A range: `Out for Thursday & Friday:` or `Out for Monday, Tuesday & Wednesday:`
 
-The header reflects the **target** day(s), not the current day.
+The header reflects the **target** day(s), not the current day. **Never name a weekday from
+memory.** Run `date +%A` for today and the `DAY_NAME` command above for each target date, and use
+only those outputs, in the header and in any bullet that mentions a day ("landed Wednesday").
 
 ### 2. Gather GitHub PR activity
 
@@ -247,3 +249,5 @@ Conventions the outline must follow:
 6. **Don't pad sections.** No header for a single throwaway bullet; fold it into the nearest workstream or drop it.
 7. **Don't use the `slack` CLI or Node helper scripts.** curl + `SLACK_API_TOKEN_OFT` + Block Kit JSON only.
 8. **Don't put a date in the header.**
+9. **Don't guess weekday names.** Every day name in the post comes from `date`; a wrong day name in the header is the most visible mistake possible.
+10. **Slack search results HTML-escape `&`** ("Out for Tuesday &amp; Wednesday"). Match on the timestamp or unescape before comparing when looking up an earlier post (for example to `chat.update` it).
