@@ -59,7 +59,10 @@ scripts in `scripts/`.
 TARGET_ISO=$(date +"%Y-%m-%d")                 # today
 TARGET_ISO=$(date -v-1d +"%Y-%m-%d")           # yesterday
 # last business day
-if [ "$(date +%u)" = "1" ]; then TARGET_ISO=$(date -v-3d +"%Y-%m-%d"); else TARGET_ISO=$(date -v-1d +"%Y-%m-%d"); fi
+TARGET_ISO=$(date -v-1d +"%Y-%m-%d")
+while [ "$(date -j -f "%Y-%m-%d" "$TARGET_ISO" +%u)" -gt 5 ]; do
+  TARGET_ISO=$(date -j -v-1d -f "%Y-%m-%d" "$TARGET_ISO" +"%Y-%m-%d")
+done
 NEXT_ISO=$(date -j -v+1d -f "%Y-%m-%d" "$TARGET_ISO" +"%Y-%m-%d")
 DAY_NAME=$(LC_TIME=en_US.UTF-8 date -j -f "%Y-%m-%d" "$TARGET_ISO" +"%A")
 SCRATCH=<the session scratchpad directory>   # all intermediate files go here
@@ -78,20 +81,25 @@ only those outputs, in the header and in any bullet that mentions a day ("landed
 ### 2. Gather GitHub PR activity
 
 ```bash
-gh api search/issues -X GET -f q="author:@me is:pr updated:>=${TARGET_ISO}" --jq '.items[] | {title, html_url, number, repository_url, draft, state}'
+gh api search/issues --paginate -X GET -f per_page=100 -f q="author:@me is:pr updated:>=${TARGET_ISO}" --jq '{total_count, incomplete_results, items: [.items[] | {title, html_url, number, repository_url, draft, state}]}'
 ```
 
 For each PR:
-- `gh api repos/{owner}/{repo}/pulls/{number}/commits --jq '.[] | {sha: .sha[0:7], date: .commit.author.date, msg: .commit.message}'`
+- `gh api repos/{owner}/{repo}/pulls/{number}/commits --paginate -X GET -f per_page=100 --jq '.[] | {sha: .sha[0:7], date: .commit.author.date, msg: .commit.message}'`
   and keep only commits whose author date (in local time) falls on the target day.
-- `gh api repos/{owner}/{repo}/pulls/{number}` for `created_at`, `merged_at`, `draft`, body.
+- `gh api repos/{owner}/{repo}/pulls/{number}` for `created_at`, `merged_at`, `state`, `draft`, body.
 - Classify:
   - **New PR** (`created_at` on the target day): candidate for a bullet.
   - **Existing PR, substantial new work** (new approach, large diff, scope change): candidate, phrased as "Reworked …" or "Extended …".
   - **Existing PR, small follow-up** (review fixes, a small bug, CI, rebase, merge only): **drop**. Do not list it, do not add a sub-bullet for it.
-- Note `draft: false` for **RTR** marking.
-- Reviews I gave that day: `gh api search/issues -X GET -f q="commenter:<login> org:PSPDFKit is:pr updated:>=${TARGET_ISO}"`, then `pulls/{n}/reviews` and `pulls/{n}/comments` filtered to my login and the target date. Keep only reviews with substantive findings.
+- Mark **RTR** only when `state: open`, `draft: false`, and `merged_at: null`. Closed or merged PRs never get RTR.
+- Reviews I gave that day: `gh api search/issues --paginate -X GET -f per_page=100 -f q="commenter:<login> org:PSPDFKit is:pr updated:>=${TARGET_ISO}"`, then `repos/{owner}/{repo}/pulls/{n}/reviews` and `repos/{owner}/{repo}/pulls/{n}/comments`, each with `--paginate -X GET -f per_page=100`, filtered to my login and the target date. Keep only reviews with substantive findings.
 - Read the PR body and commits to understand the *effect* of the change, and the motivation (customer report, dogfooding, release, flaky CI). That is what the bullet should say.
+
+Fetch every page before filtering. Keep the search's lower bound for historical runs: a PR
+worked on that day may have been updated again later. If GitHub reports `incomplete_results`
+or more than its 1,000-result search limit, split the search by repository or date interval
+and combine the results before classifying activity.
 
 ### 3. Scan Claude Code session history
 
@@ -121,15 +129,18 @@ and 4 while it runs; do not finish the turn before its result is in.
 - **Identity**: `curl -s https://slack.com/api/auth.test --header "Authorization: Bearer $SLACK_API_TOKEN_OFT"`. Use `.user_id` as `USER_ID` (post target: posting to your own id opens the self-DM) and `.user` (username for search).
 - **My messages that day**:
   ```bash
-  curl -s "https://slack.com/api/search.messages?query=from%3A<username>+on%3A${TARGET_ISO}&count=100" --header "Authorization: Bearer $SLACK_API_TOKEN_OFT"
+  curl -s "https://slack.com/api/search.messages?query=from%3A<username>+on%3A${TARGET_ISO}&count=100&page=1" --header "Authorization: Bearer $SLACK_API_TOKEN_OFT"
   ```
-- Group by thread (`thread_ts` in the permalink); fetch `conversations.replies` for threads where I wrote more than a one-liner, to get the question, the alternatives and the outcome.
+- For every `search.messages` query, including dedup searches, check `ok` and fetch pages `1` through `messages.paging.pages`; `count=100` is a page size, not a total limit. Combine matches before filtering or grouping.
+- Group by thread (`thread_ts` in the permalink); fetch `conversations.replies` for threads where I wrote more than a one-liner, to get the question, the alternatives and the outcome. Follow `response_metadata.next_cursor` until empty and combine every page before summarising.
 - Keep only threads where I contributed analysis or made a call (customer investigations, technical decisions, release scope, ownership). Drop announcements, review requests, assignments, meetings, chit-chat, and my own OFT posts.
 
 ### 5. Dedup and filter
 
-- Search my recent OFT posts: `search.messages` with `query=from:<username> "Out for"` over the last ~7 days (they land in the self-DM and in #mobile). Collect PR numbers (`#(\d+)`) already reported.
-- Drop any PR in that set unless the target day added genuinely new scope (see Step 2). When in doubt, drop.
+- Search my OFT posts in the self-DM and #mobile with `query=from:<username> "Out for" after:<start-minus-8-days> before:<end-plus-1-day>`, using exclusive date bounds to cover the seven days before the earliest requested date through the last requested date. Anchor this window to the requested dates, not today, and fetch every page.
+- Only dedup against OFTs covering days strictly before the earliest requested day. Resolve relative headers against each post's local timestamp. Exclude posts covering the requested or later days, so regenerating an old summary does not suppress its own work; skip ambiguous dates.
+- Collect canonical PR URLs (`https://github.com/<owner>/<repo>/pull/<number>`) from message links, including Block Kit link elements. Use repository plus number as the identity, never a bare `#number`; different repositories can have the same number. Ignore unresolvable bare references.
+- Drop any PR in that set unless the target day added genuinely new scope (see Step 2). When in doubt about new scope, drop.
 - Apply the include/exclude bar from the top of this file to everything: PRs, session work, threads.
 - **Merge siblings**: several PRs that are one story (three flaky-test fixes, a stack of PRs for one feature, migration guide + release notes) become **one bullet with several links**. Do not list them separately.
 
@@ -162,7 +173,7 @@ timings, sizes, percentages).
 - Say what the reader gains: "so custom layouts keep the document above the keyboard", "found while dogfooding the viewer, not from a customer report", "unblocks the 11.7 release".
 - Plain words over identifiers. A code identifier (in `code` style) is fine when it is the clearest name for the thing.
 - No mechanism, file names, or repro steps on the bullet line; the PR carries them.
-- Mark non-draft PRs with bold **RTR** after the link.
+- Mark open, non-draft, unmerged PRs with bold **RTR** after the link.
 - Slack links use a descriptive label: `thread`, `#android thread`, `Slack handover`.
 
 **Sub-bullets** (`indent: 1`) are for a second layer of signal only:
@@ -223,10 +234,11 @@ identifiers, `**RTR**` for bold. Leave out the `## ` lines for a flat post.
 The builder emits one `rich_text` block: each section is a `rich_text_section` holding a newline,
 the bold header and a newline, followed by a `rich_text_list` (`indent: 0`); sub-bullets are a
 following `rich_text_list` with `indent: 1`. This is the structure Nick's posts use and it renders
-with a blank line between sections.
+with a blank line between sections. The top-level `text` also contains the full outline with
+link URLs for notifications and screen readers.
 
 Conventions the outline must follow:
-- PR link label is the number only: `#58726`. Several related PRs: links separated by a space, one **RTR** at the end if the set is ready for review.
+- PR link label is the number only: `#58726`. Several related PRs: links separated by a space, one **RTR** at the end only if every PR is open, non-draft and unmerged. For mixed sets, put **RTR** immediately after each qualifying PR's link.
 - Slack link labels are descriptive: `thread`, `#design`, `#engineering thread`, `Slack handover`.
 - No emoji.
 

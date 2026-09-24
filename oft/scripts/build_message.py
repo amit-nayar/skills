@@ -98,13 +98,17 @@ def build(outline):
     return elements, header
 
 
-def preview(elements):
+def preview(elements, include_urls=False):
     def render(sec):
-        return "".join(e["text"] if e["type"] != "link" else f"<{e['text']}>" for e in sec["elements"])
+        return "".join(
+            e["text"] if e["type"] != "link" else
+            (f"{e['text']} ({e['url']})" if include_urls else f"<{e['text']}>")
+            for e in sec["elements"]
+        )
     out = []
     for e in elements:
         if e["type"] == "rich_text_section":
-            out.append(render(e))
+            out.append(render(e).rstrip("\n") + "\n")
         else:
             for item in e["elements"]:
                 out.append(("    ◦ " if e["indent"] else "• ") + render(item) + "\n")
@@ -115,13 +119,13 @@ def main():
     if len(sys.argv) < 3:
         raise SystemExit(__doc__)
     outline = open(sys.argv[1]).read()
-    elements, header = build(outline)
+    elements, _ = build(outline)
     if "--preview" in sys.argv:
         print(preview(elements))
         return
     payload = {
         "channel": sys.argv[2],
-        "text": header.rstrip(":"),
+        "text": preview(elements, include_urls=True).rstrip(),
         "blocks": [{"type": "rich_text", "elements": elements}],
     }
     json.dump(payload, sys.stdout, ensure_ascii=False, indent=1)

@@ -23,7 +23,7 @@ import zoneinfo
 PR_RE = re.compile(r"#\d{4,6}|\b(?:AND|IOS|WEBL|COREL|SERL|HYB|AI)-\d+\b")
 
 
-def text_of(msg, max_chars):
+def text_of(msg):
     """Return (role_text, tools) for a message content payload."""
     content = msg.get("content")
     parts, tools = [], []
@@ -49,8 +49,6 @@ def text_of(msg, max_chars):
                 pass  # results are noise for a summary
     text = "\n".join(p for p in parts if p).strip()
     text = re.sub(r"\n{2,}", "\n", text)
-    if len(text) > max_chars:
-        text = text[:max_chars] + " …"
     return text, tools
 
 
@@ -74,7 +72,7 @@ def digest_file(path, day, tz, max_chars, per_file):
             if when.date() != day:
                 continue
             msg = rec.get("message") or {}
-            text, tools = text_of(msg, max_chars)
+            text, tools = text_of(msg)
             if rec.get("type") == "user" and (rec.get("isMeta") or text.startswith("<")):
                 # hook output, command wrappers, tool results echoed as user turns
                 if not tools:
@@ -83,6 +81,8 @@ def digest_file(path, day, tz, max_chars, per_file):
                 continue
             for m in PR_RE.findall(text):
                 refs.add(m)
+            if len(text) > max_chars:
+                text = text[:max_chars] + " …"
             entries.append((when, rec["type"], text, tools))
     return entries, refs
 
