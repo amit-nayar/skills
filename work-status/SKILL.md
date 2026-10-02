@@ -23,11 +23,21 @@ is inline with the helper scripts.
    python3 ~/dev/me/skills/work-status/scripts/gather.py > "$SCRATCH/status.json"
    ```
 
-   `SCRATCH` is the session scratchpad. The JSON has `prs` (open PRs with review/CI/merge state and
-   the clone(s) holding the branch), `clones` (clones with uncommitted files), `branches_without_pr`
-   (my unfinished local branches with no open PR), and `linear` (assigned issues, projects I lead).
+   `SCRATCH` is the session scratchpad. The JSON has:
+   - `complete` / `errors` — if `complete` is false, some source failed (gh auth, rate limit,
+     Linear). Start the post with `Snapshot incomplete: <errors, briefly>` and never say
+     "everything is quiet" — missing data is not an empty queue.
+   - `prs` — open PRs with review/CI/merge state and the clone(s) holding the branch (matched on
+     repo + branch). Skip classifying a PR with `detail_missing: true`; list it as "couldn't load".
+   - `clones` — clones with uncommitted files.
+   - `branches_without_pr` — my branches ahead of the default branch with no open PR in that repo.
+     Merged ones are already dropped. `push_state` is `never` / `ahead` (local commits not pushed) /
+     `gone` (remote deleted) / `pushed`; `last_pr` is the most recent closed PR for the branch, if any.
+   - `linear` — assigned issues (each linked PR with its `state`: OPEN / MERGED / CLOSED) and
+     projects I lead. `null` if Linear failed (see `errors`).
 
-2. Write the outline (format below) and post it, as in step 3.
+2. Write the outline (format below) and post it (see Post). If `gather.py` itself crashes, post
+   `Work status: snapshot failed — <error>` rather than nothing.
 
 ## What goes in the post
 
@@ -39,10 +49,11 @@ that share a story or need the same thing into one line (a stack of eval PRs is 
 - approved and not yet queued: "queue it"
 - merge conflicts: "rebase"
 - failing CI: name the failing check(s)
-- review feedback waiting on me, or a draft with a green CI that looks ready: "mark ready"
+- changes requested (`review` is `CHANGES_REQUESTED`): "address feedback"
+- a draft with green CI that looks ready: "mark ready"
 
-**Waiting on others** — ready PRs with no human review yet (`human_reviewers` empty) or
-changes-requested pending, with days idle.
+**Waiting on others** — ready PRs with no human review yet (`human_reviewers` empty), or reviewed
+but not yet approved, with days idle. Pending CI alone is not waiting on others.
 
 **Drafts in progress** — drafts not otherwise listed, with days idle.
 
@@ -50,18 +61,21 @@ changes-requested pending, with days idle.
 into a single line when several.
 
 **Local branches without a PR** — from `branches_without_pr`, with `clone · branch`, idle days, and
-whether it is unpushed. Also mention clones with uncommitted files that aren't explained by a PR above.
+the push state in words ("never pushed", "unpushed commits", "remote deleted"). When `last_pr` is a
+closed (unmerged) PR, link it: "PR [#123](…) closed unmerged — drop or reopen?". Also mention
+clones with uncommitted files that aren't explained by a PR above.
 
-**Linear** — in-flight issues (type `started`) with no PR link, or whose PR is merged/closed, so the
-status is probably wrong; `unstarted` issues untouched for a long time can be one summary line. Skip
+**Linear** — in-flight issues (type `started`) with no PR link, or whose linked PRs are all
+`MERGED`/`CLOSED`, so the status is probably wrong (use each PR's `state`; a `null` state is unknown,
+not closed); `unstarted` issues untouched for a long time can be one summary line. Skip
 issues already covered by a PR line above (cross-reference by PR url) except to flag a state
 mismatch (e.g. PR merged but issue still In Review).
 **Projects needing an update** — projects I lead with `days_since_update` over 14 or null, one line
 each with the project link.
 
 Judgement calls: leave out PRs that need nothing and are fresh unless they matter; don't repeat the
-PR title when the number plus a few words say it; no emoji, no padding. If everything is quiet,
-say so in one line.
+PR title when the number plus a few words say it; no emoji, no padding. If everything is quiet
+(and `complete` is true), say so in one line.
 
 ## Post
 
