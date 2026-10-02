@@ -98,12 +98,28 @@ def pr_state(url):
     return json.loads(raw)["state"] if raw else None
 
 
-def tip_merged(d, tip, pr_head):
-    """True if the local tip is the merged PR's head or an ancestor of it (nothing newer)."""
+def tip_merged(d, repo, branch, tip, pr_head):
+    """Whether the merged PR's head covers the local tip: True, False, or None if unverifiable.
+
+    A clone that hasn't fetched the PR's final commits can't answer locally (git exits 128, not 1),
+    so ask GitHub instead; only a definite "no" means there is newer work.
+    """
     if not pr_head:
-        return False
-    return tip == pr_head or subprocess.run(
-        ["git", "merge-base", "--is-ancestor", tip, pr_head], cwd=d, capture_output=True).returncode == 0
+        return None
+    if tip == pr_head:
+        return True
+    rc = subprocess.run(["git", "merge-base", "--is-ancestor", tip, pr_head], cwd=d,
+                        capture_output=True).returncode
+    if rc in (0, 1):
+        return rc == 0
+    # compare/base...head: "ahead"/"identical" means pr_head contains tip.
+    status = run(["gh", "api", f"repos/{repo}/compare/{tip}...{pr_head}", "-q", ".status"],
+                 expect_fail=True)
+    if status:
+        return status in ("ahead", "identical")
+    ERRORS.append(f"merge coverage unknown for {branch} (in {d.name}): {pr_head[:9]} not local, "
+                  "GitHub compare failed")
+    return None
 
 
 def repo_dirs():
@@ -221,12 +237,18 @@ def main():
     orphans = []
     for c, b in candidates:
         last = closed.get(key(c["repo"], b["branch"]))
-        if last and last["state"] == "MERGED" and tip_merged(c["path"], b["tip"], last["head"]):
-            continue  # finished; cleanup-branches deletes these
-        # A MERGED last_pr that survives here means commits were added after the merge.
+        covered = None
+        if last and last["state"] == "MERGED":
+            covered = tip_merged(c["path"], c["repo"], b["branch"], b["tip"], last["head"])
+            if covered:
+                continue  # finished; cleanup-branches deletes these
         orphans.append({"clone": c["clone"], "repo": c["repo"],
                         **{k: v for k, v in b.items() if k != "tip"},
-                        "last_pr": {k: last[k] for k in ("url", "state")} if last else None})
+                        "last_pr": ({k: last[k] for k in ("url", "state")}
+                                    # MERGED only: False = commits added after the merge,
+                                    # None = couldn't tell.
+                                    | ({"tip_covered": covered} if last["state"] == "MERGED" else {})
+                                    if last else None)})
 
     # Linear-linked PR states, so a status mismatch can be flagged without guessing.
     if lin:

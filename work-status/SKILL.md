@@ -64,7 +64,9 @@ into a single line when several.
 **Local branches without a PR** — from `branches_without_pr`, with `clone · branch`, idle days, and
 the push state in words ("never pushed", "unpushed commits", "remote deleted"). When `last_pr` is a
 closed (unmerged) PR, link it: "PR [#123](…) closed unmerged — drop or reopen?". When it is
-`MERGED`, the branch has commits added after that merge: "new commits since [#123](…) merged". Also mention
+`MERGED`, check `last_pr.tip_covered`: `false` means commits were added after that merge ("new
+commits since [#123](…) merged"); `null` means it couldn't be verified ("[#123](…) merged, not sure
+whether the branch has newer commits"). Never claim new work from `null`. Also mention
 clones with uncommitted files that aren't explained by a PR above.
 
 **Linear** — in-flight issues (type `started`) with no PR link, or whose linked PRs are all
