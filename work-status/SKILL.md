@@ -31,8 +31,9 @@ is inline with the helper scripts.
      repo + branch). Skip classifying a PR with `detail_missing: true`; list it as "couldn't load".
    - `clones` — clones with uncommitted files.
    - `branches_without_pr` — my branches ahead of the default branch with no open PR in that repo.
-     Merged ones are already dropped. `push_state` is `never` / `ahead` (local commits not pushed) /
-     `gone` (remote deleted) / `pushed`; `last_pr` is the most recent closed PR for the branch, if any.
+     Branches whose tip was merged are already dropped. `push_state` is `never` / `ahead` (local
+     commits not pushed) / `gone` (remote deleted) / `pushed`; `ahead_of_default` is `null` when the
+     comparison failed (see `errors`). `last_pr` is the most recent closed PR for the branch, if any.
    - `linear` — assigned issues (each linked PR with its `state`: OPEN / MERGED / CLOSED) and
      projects I lead. `null` if Linear failed (see `errors`).
 
@@ -62,7 +63,8 @@ into a single line when several.
 
 **Local branches without a PR** — from `branches_without_pr`, with `clone · branch`, idle days, and
 the push state in words ("never pushed", "unpushed commits", "remote deleted"). When `last_pr` is a
-closed (unmerged) PR, link it: "PR [#123](…) closed unmerged — drop or reopen?". Also mention
+closed (unmerged) PR, link it: "PR [#123](…) closed unmerged — drop or reopen?". When it is
+`MERGED`, the branch has commits added after that merge: "new commits since [#123](…) merged". Also mention
 clones with uncommitted files that aren't explained by a PR above.
 
 **Linear** — in-flight issues (type `started`) with no PR link, or whose linked PRs are all

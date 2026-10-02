@@ -72,28 +72,38 @@ def pr_detail(pr):
 def closed_prs(login):
     """My recently closed/merged PRs keyed by (repo, branch) -> newest {url, state}."""
     q = """query($q: String!) { search(query: $q, type: ISSUE, first: 100) { nodes {
-      ... on PullRequest { url state headRefName closedAt repository { nameWithOwner } } } } }"""
+      ... on PullRequest { url state headRefName headRefOid closedAt repository { nameWithOwner } } } } }"""
     raw = run(["gh", "api", "graphql", "-f", f"query={q}",
                "-f", f"q=is:pr author:{login} is:closed sort:updated-desc"])
     out = {}
     for p in (json.loads(raw)["data"]["search"]["nodes"] if raw else []):
         k = key(p["repository"]["nameWithOwner"], p["headRefName"])
         if k not in out or (p["closedAt"] or "") > (out[k]["closed_at"] or ""):
-            out[k] = {"url": p["url"], "state": p["state"], "closed_at": p["closedAt"]}
+            out[k] = {"url": p["url"], "state": p["state"], "closed_at": p["closedAt"],
+                      "head": p["headRefOid"]}
     return out
 
 
 def pr_for_branch(repo, branch):
     """Newest PR (any state) for a head branch, for branches the closed-PR search missed."""
     raw = run(["gh", "pr", "list", "-R", repo, "--head", branch, "--state", "all", "--limit", "1",
-               "--json", "url,state,closedAt"])
+               "--json", "url,state,closedAt,headRefOid"])
     prs = json.loads(raw) if raw else []
-    return {"url": prs[0]["url"], "state": prs[0]["state"], "closed_at": prs[0]["closedAt"]} if prs else None
+    return ({"url": prs[0]["url"], "state": prs[0]["state"], "closed_at": prs[0]["closedAt"],
+             "head": prs[0]["headRefOid"]} if prs else None)
 
 
 def pr_state(url):
     raw = run(["gh", "pr", "view", url, "--json", "state"])
     return json.loads(raw)["state"] if raw else None
+
+
+def tip_merged(d, tip, pr_head):
+    """True if the local tip is the merged PR's head or an ancestor of it (nothing newer)."""
+    if not pr_head:
+        return False
+    return tip == pr_head or subprocess.run(
+        ["git", "merge-base", "--is-ancestor", tip, pr_head], cwd=d, capture_output=True).returncode == 0
 
 
 def repo_dirs():
@@ -109,23 +119,30 @@ def origin_repo(d):
 def local_branches(d):
     """Branches in one clone: name, checked-out, dirty, last commit, push state."""
     default = run(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], d,
-                  expect_fail=True).removeprefix("origin/") or "master"
+                  expect_fail=True).removeprefix("origin/")
+    if not default:  # origin/HEAD unset: use whichever of main/master the remote has
+        default = next((b for b in ("main", "master") if run(
+            ["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{b}"], d, expect_fail=True)), None)
+    if not default:
+        ERRORS.append(f"git (in {d.name}): no origin/HEAD, origin/main or origin/master")
     head = run(["git", "branch", "--show-current"], d, expect_fail=True)
     dirty = len(run(["git", "status", "--porcelain"], d).splitlines())
     emails = EMAILS | {run(["git", "config", "user.email"], d, expect_fail=True)} - {""}
     out = []
-    fmt = "%(refname:short)|%(upstream:track)|%(upstream)|%(authoremail)|%(committerdate:iso-strict)"
+    fmt = ("%(refname:short)|%(objectname)|%(upstream:track)|%(upstream)|%(authoremail)|"
+           "%(committerdate:iso-strict)")
     for line in run(["git", "for-each-ref", f"--format={fmt}", "refs/heads"], d).splitlines():
-        name, track, upstream, author, date = line.split("|", 4)
+        name, tip, track, upstream, author, date = line.split("|", 5)
         if name in (default, "main", "master") or RELEASE.search(name):
             continue
-        ahead = run(["git", "rev-list", "--count", f"origin/{default}..{name}"], d, expect_fail=True)
+        # None = comparison failed (logged): keep the branch rather than call it 0 ahead.
+        ahead = run(["git", "rev-list", "--count", f"origin/{default}..{name}"], d) if default else ""
         push = ("never" if not upstream else "gone" if "gone" in track
                 else "ahead" if "ahead" in track else "pushed")
         out.append({"branch": name, "mine": author.strip("<>") in emails, "push_state": push,
-                    "ahead_of_default": int(ahead or 0), "idle_days": age_days(date),
-                    "checked_out": name == head})
-    return {"clone": d.name, "repo": origin_repo(d), "head": head or "(detached)",
+                    "ahead_of_default": int(ahead) if ahead else None, "idle_days": age_days(date),
+                    "checked_out": name == head, "tip": tip})
+    return {"clone": d.name, "path": d, "repo": origin_repo(d), "head": head or "(detached)",
             "dirty_files": dirty, "branches": out}
 
 
@@ -190,7 +207,7 @@ def main():
 
     # My branches with commits not on the default branch and no open PR in the same repo.
     candidates = [(c, b) for c in clones for b in c["branches"]
-                  if b["mine"] and b["ahead_of_default"] > 0
+                  if b["mine"] and b["ahead_of_default"] != 0
                   and c["repo"] and c["repo"].lower() not in SKIP_REPOS
                   and key(c["repo"], b["branch"]) not in open_by_branch]
     # Look up a PR for gone branches the closed search didn't cover: a deleted remote is not
@@ -204,9 +221,11 @@ def main():
     orphans = []
     for c, b in candidates:
         last = closed.get(key(c["repo"], b["branch"]))
-        if last and last["state"] == "MERGED":
+        if last and last["state"] == "MERGED" and tip_merged(c["path"], b["tip"], last["head"]):
             continue  # finished; cleanup-branches deletes these
-        orphans.append({"clone": c["clone"], "repo": c["repo"], **b,
+        # A MERGED last_pr that survives here means commits were added after the merge.
+        orphans.append({"clone": c["clone"], "repo": c["repo"],
+                        **{k: v for k, v in b.items() if k != "tip"},
                         "last_pr": {k: last[k] for k in ("url", "state")} if last else None})
 
     # Linear-linked PR states, so a status mismatch can be flagged without guessing.
