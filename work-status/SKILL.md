@@ -2,6 +2,7 @@
 name: work-status
 description: Post a short status of all my current Nutrient work to my Slack DM — open PRs (what needs action), unfinished local branches, in-flight Linear issues and Linear projects that need an update. Runs Mondays 8:30 via launchd; run /work-status any time for a fresh snapshot.
 user-invocable: true
+argument-hint: "[all]"
 allowed-tools: Bash, Read
 ---
 
@@ -16,11 +17,12 @@ is inline with the helper scripts.
 
 ## Steps
 
-1. Gather (takes ~10s):
+1. Gather (takes ~10s). PRs are limited to the Nutrient GitHub orgs (`PSPDFKit`, `PSPDFKit-labs`);
+   when invoked as `/work-status all`, add `--all` to include personal and other repos too.
 
    ```bash
    set -a && . ~/.zprofile >/dev/null 2>&1; set +a
-   python3 ~/dev/me/skills/work-status/scripts/gather.py > "$SCRATCH/status.json"
+   python3 ~/dev/me/skills/work-status/scripts/gather.py > "$SCRATCH/status.json"  # add --all for `all`
    ```
 
    `SCRATCH` is the session scratchpad. The JSON has:
@@ -28,10 +30,14 @@ is inline with the helper scripts.
      Linear). Start the post with `Snapshot incomplete: <errors, briefly>` and never say
      "everything is quiet" — missing data is not an empty queue.
    - `prs` — open PRs with review/CI/merge state and the clone(s) holding the branch (matched on
-     repo + branch). Skip classifying a PR with `detail_missing: true`; list it as "couldn't load".
+     repo + branch). Checks are deduplicated to the newest run: `failed_checks` are real failures,
+     `cancelled_checks` didn't finish (not a failure). `merge_queue` is the Mergify queue check's
+     title for approved PRs. Skip classifying a PR with `detail_missing: true`; list it as
+     "couldn't load".
    - `clones` — clones with uncommitted files.
-   - `branches_without_pr` — my branches ahead of the default branch with no open PR in that repo.
-     Branches whose tip was merged are already dropped. `push_state` is `never` / `ahead` (local
+   - `branches_without_pr` — my branches (named `amit/…`, or started by me under a type prefix like
+     `fix/…`; branches named for someone else, like `akshay/…`, are theirs) ahead of the default
+     branch with no open PR in that repo. Branches whose tip was merged are already dropped. `push_state` is `never` / `ahead` (local
      commits not pushed) / `gone` (remote deleted) / `pushed`; `ahead_of_default` is `null` when the
      comparison failed (see `errors`). `last_pr` is the most recent closed PR for the branch, if any.
    - `linear` — assigned issues (each linked PR with its `state`: OPEN / MERGED / CLOSED) and
@@ -47,9 +53,11 @@ where it lives as `clone · branch`. Add `(dirty)` when that clone has uncommitt
 that share a story or need the same thing into one line (a stack of eval PRs is one line, not nine).
 
 **Needs action** — PRs where the next move is mine:
-- approved and not yet queued: "queue it"
+- approved and `merge_queue` is "Merge queue is ready" (not queued yet): "queue it". Any other
+  `merge_queue` title means it's already queued or merging; leave it out unless the title says it
+  failed or was dequeued.
 - merge conflicts: "rebase"
-- failing CI: name the failing check(s)
+- failing CI: name the `failed_checks`. Only cancelled checks: "re-run <check>", not "failing".
 - changes requested (`review` is `CHANGES_REQUESTED`): "address feedback"
 - a draft with green CI that looks ready: "mark ready"
 

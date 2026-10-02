@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Collect my open PRs, unfinished local branches and Linear state as JSON.
 
-Read-only. Usage: gather.py
+Read-only. Usage: gather.py [--all]   (--all: include PRs outside the Nutrient GitHub orgs)
 Needs `gh` auth and LINEAR_API_KEY (source ~/.zprofile first). Any source that fails is listed
 in `errors` and `complete` is false, so a failure never looks like a quiet week.
 """
@@ -16,8 +16,14 @@ EMAILS = {"amit@nutrient.io", "amit.nyr@gmail.com"}
 NOW = datetime.now(timezone.utc)
 # Repos whose branches/PRs are not "my work" for this report (e.g. retired).
 SKIP_REPOS = {"pspdfkit/pspdfkit-website"}
+NUTRIENT_ORGS = {"pspdfkit", "pspdfkit-labs"}
 BOTS = {"nutrient-code-reviewer", "copilot-pull-request-reviewer", "linear-code", "mergify"}
-FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+# CANCELLED is reported separately: a cancelled run didn't finish, it didn't fail.
+FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+# First path segment of branches named after a type rather than a person ("fix/…", "stack/…").
+TYPE_PREFIXES = {"fix", "bugfix", "hotfix", "feature", "feat", "improvement", "cleanup", "chore",
+                 "docs", "refactor", "test", "ci", "build", "perf", "stack", "release", "wip"}
+MY_PREFIXES = {"amit", "amit-nayar"}
 # Release branches carry cherry-picks, so they are always "ahead" but never unfinished work.
 RELEASE = re.compile(r"(-stable$|^release[/-])")
 ERRORS = []
@@ -47,12 +53,20 @@ def key(repo, branch):
 def pr_detail(pr):
     repo, n = pr["repository"]["nameWithOwner"], pr["number"]
     raw = run(["gh", "pr", "view", str(n), "-R", repo, "--json",
-               "headRefName,baseRefName,reviewDecision,mergeable,mergeStateStatus,"
+               "headRefName,headRefOid,baseRefName,reviewDecision,mergeable,mergeStateStatus,"
                "latestReviews,statusCheckRollup"])
     d = json.loads(raw) if raw else {}
-    checks = d.get("statusCheckRollup") or []
-    failed = [c.get("name") or c.get("context") for c in checks
+    # Re-runs leave several entries per check; only the newest one counts.
+    latest = {}
+    for c in d.get("statusCheckRollup") or []:
+        name = c.get("name") or c.get("context")
+        when = c.get("startedAt") or c.get("createdAt") or ""
+        if name not in latest or when >= latest[name][0]:
+            latest[name] = (when, c)
+    checks = [c for _, c in latest.values()]
+    failed = [n for n, (_, c) in latest.items()
               if c.get("conclusion") in FAILED or c.get("state") in FAILED]
+    cancelled = [n for n, (_, c) in latest.items() if c.get("conclusion") == "CANCELLED"]
     pending = sum(1 for c in checks if c.get("status") in ("IN_PROGRESS", "QUEUED", "PENDING")
                   or c.get("state") in ("PENDING", "EXPECTED"))
     humans = [r["author"]["login"] for r in d.get("latestReviews") or []
@@ -62,11 +76,32 @@ def pr_detail(pr):
         "draft": pr["isDraft"], "branch": d.get("headRefName"), "base": d.get("baseRefName"),
         "review": d.get("reviewDecision") or "", "human_reviewers": humans,
         "mergeable": d.get("mergeable"), "merge_state": d.get("mergeStateStatus"),
-        "failed_checks": failed, "pending_checks": pending,
+        "failed_checks": failed, "cancelled_checks": cancelled, "pending_checks": pending,
+        "merge_queue": merge_queue(repo, d["headRefOid"])
+        if d.get("reviewDecision") == "APPROVED" and "Mergify Merge Queue" in latest else None,
         "idle_days": age_days(pr["updatedAt"]),
         # Review/CI fields are blank when this is true; don't classify the PR from them.
         "detail_missing": not d,
     }
+
+
+def merge_queue(repo, sha):
+    """Title of the Mergify queue check: "Merge queue is ready" means approved but not queued."""
+    return run(["gh", "api", f"repos/{repo}/commits/{sha}/check-runs?check_name=Mergify%20Merge%20Queue",
+                "-q", ".check_runs[0].output.title"]) or None
+
+
+def is_mine(d, name, base, tip_author, emails):
+    """Branches named for someone else ("akshay/…") aren't mine even if I committed to them.
+    Otherwise go by the oldest commit on the branch: whoever started it owns it."""
+    first = name.split("/", 1)[0] if "/" in name else ""
+    if first in MY_PREFIXES:
+        return True
+    if first and first not in TYPE_PREFIXES:
+        return False
+    oldest = run(["git", "log", "--reverse", "--format=%ae", f"{base}..{name}"], d,
+                 expect_fail=True).split("\n", 1)[0] if base else ""
+    return (oldest or tip_author) in emails
 
 
 def closed_prs(login):
@@ -155,7 +190,7 @@ def local_branches(d):
         ahead = run(["git", "rev-list", "--count", f"origin/{default}..{name}"], d) if default else ""
         push = ("never" if not upstream else "gone" if "gone" in track
                 else "ahead" if "ahead" in track else "pushed")
-        out.append({"branch": name, "mine": author.strip("<>") in emails, "push_state": push,
+        out.append({"branch": name, "mine": is_mine(d, name, default and f"origin/{default}", author.strip("<>"), emails), "push_state": push,
                     "ahead_of_default": int(ahead) if ahead else None, "idle_days": age_days(date),
                     "checked_out": name == head, "tip": tip})
     return {"clone": d.name, "path": d, "repo": origin_repo(d), "head": head or "(detached)",
@@ -202,11 +237,13 @@ def linear():
 
 
 def main():
+    include_all = "--all" in sys.argv[1:]
     login = run(["gh", "api", "user", "-q", ".login"])
     raw = run(["gh", "search", "prs", "--author", "@me", "--state", "open", "--limit", "100",
                "--json", "number,title,repository,isDraft,url,updatedAt"])
     prs_raw = [p for p in json.loads(raw or "[]")
-               if p["repository"]["nameWithOwner"].lower() not in SKIP_REPOS]
+               if p["repository"]["nameWithOwner"].lower() not in SKIP_REPOS
+               and (include_all or p["repository"]["nameWithOwner"].split("/")[0].lower() in NUTRIENT_ORGS)]
     with ThreadPoolExecutor(8) as ex:
         f_closed = ex.submit(closed_prs, login) if login else None
         f_linear = ex.submit(linear)
