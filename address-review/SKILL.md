@@ -28,7 +28,7 @@ Fetch only the feedback the URL points to:
 | URL fragment | Fetch |
 | --- | --- |
 | `pullrequestreview-ID` | `gh api repos/O/R/pulls/N/reviews/ID` (body) and `gh api repos/O/R/pulls/N/reviews/ID/comments --paginate` |
-| `discussion_rID` | `gh api repos/O/R/pulls/comments/ID`, plus the rest of its thread (`gh api repos/O/R/pulls/N/comments --paginate`, filter `in_reply_to_id == ID`) |
+| `discussion_rID` | Fetch the comment with `gh api repos/O/R/pulls/comments/ID`. If it has `in_reply_to_id`, use that value as the thread's top-level comment ID; otherwise use `ID`. Fetch the full comments list with `gh api repos/O/R/pulls/N/comments --paginate` and collect the top-level comment plus comments whose `in_reply_to_id` equals that top-level ID. |
 | `issuecomment-ID` | `gh api repos/O/R/issues/comments/ID` |
 | none | GraphQL `reviewThreads(first:100){nodes{isResolved comments(first:50){nodes{databaseId path line body author{login}}}}}`, keep `isResolved == false` |
 
@@ -53,7 +53,7 @@ all their worktrees — and prints TSV, best candidate first:
 3  …/monorepo3           clone        master    dirty   # repo only; branch from origin
 ```
 
-Pick the first line. Within the same rank prefer a `clean` one (no stash needed). If
+Pick the first line. Within the same rank, clean checkouts sort before dirty ones. If
 nothing matches, say so and ask where the repo lives rather than cloning it.
 
 Pass extra roots as further args if the user mentions another location.
@@ -113,8 +113,9 @@ Then reply to each comment you addressed, in the user's voice (use the `myvoice`
 if available): short, says what changed, references the commit SHA. Questions you
 couldn't answer with code get a proposed reply shown to the user first, not posted.
 
-- Inline comment: `gh api repos/O/R/pulls/N/comments/<comment-id>/replies -f body=...`
-  (reply to the thread's **top** comment id).
+- Inline comment: `gh api repos/O/R/pulls/N/comments/<top-level-comment-id>/replies -f body=...`
+  (reply to the thread's **top** comment id, found by following `in_reply_to_id` from a
+  clicked reply).
 - Review body / top-level comment: `gh pr comment N -R O/R --body ...`, quoting the
   point being answered.
 

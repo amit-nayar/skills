@@ -18,10 +18,18 @@ roots=("$@")
 repo_lc=$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')
 
 matches_repo() {
-  local url
+  local url path
   url=$(git -C "$1" remote get-url origin 2>/dev/null | tr '[:upper:]' '[:lower:]') || return 1
-  url=${url%.git}
-  [[ "$url" == *"github.com/$repo_lc" || "$url" == *"github.com:$repo_lc" ]]
+  case "$url" in
+    https://github.com/*|http://github.com/*|https://*@github.com/*|http://*@github.com/*|ssh://github.com/*|ssh://*@github.com/*)
+      path=${url#*github.com/} ;;
+    git@github.com:*|*@github.com:*)
+      path=${url#*:} ;;
+    *) return 1 ;;
+  esac
+  path=${path%/}
+  path=${path%.git}
+  [[ "$path" == "$repo_lc" ]]
 }
 
 dirty() {
@@ -58,4 +66,4 @@ for root in "${roots[@]}"; do
       printf '3\t%s\tclone\t%s\t%s\n' "$dir" "$cur" "$(dirty "$dir")"
     fi
   done
-done | sort -t$'\t' -k1,1n -k5,5r
+done | sort -t$'\t' -k1,1n -k5,5
