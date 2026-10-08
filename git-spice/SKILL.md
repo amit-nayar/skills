@@ -205,7 +205,8 @@ gs buntr                          # stop tracking
 
 - **Never `git push` a tracked branch** — always go through `gs ss` / `gs uss` / `gs branch submit`.
 - **Never start an interactive rebase via `gs sr` / `gs usr` / `gs br` when conflicts are possible.** Walk the stack manually with `git rebase --onto` as described above. Only run `gs sr --no-prompt` once the tree is already clean (as a confirmation pass).
-- **Never disable hooks or signing** (per global CLAUDE.md). `gs ss` respects `--no-verify`, do not pass it unless the user asks.
+- **Keep hooks enabled unless the user asks otherwise.** `gs ss` respects `--no-verify`, do not pass it unless the user asks.
+- **Attempt signing for every commit.** Try a signed commit first, including amendments. If that attempt fails, create the commit unsigned with a command-scoped override such as `git -c commit.gpgsign=false commit -m "..."`. Attempt signing again for each later commit; one failure does not carry forward. Do not block work or ask for approval after signing fails. For git-spice commands that create commits, propagate a temporary Git configuration to their subprocesses only after the signing attempt fails. Leave repository and global signing defaults unchanged. Report unsigned commits so they can be signed later. Re-signing changes commit IDs and may require restacking and resubmitting affected branches; do that when requested.
 - If the current repo is not git-spice initialized (`gs ls` errors), do not try to "fix" it — just use plain git and let the user know.
 - Do not confuse with `mergify stack` — that's a different tool. If the user invokes via `/mergify-stack`, defer to the mergify-stack skill.
 - When something fails because the stack is in a weird state, run `gs ls` and `git status` and show the user, rather than guessing.

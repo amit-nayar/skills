@@ -100,8 +100,10 @@ restore state (step 7) and ask the user. Never force-push, never reset someone's
 - Follow the repo's CLAUDE.md/AGENTS.md. Run the narrowest relevant check (formatter,
   the affected module's lint/unit test) when it is cheap; if it's not practical, say so.
 - Commit message style: match `git log --oneline -10` on the branch. One commit per
-  review is fine; split only if the fixes are unrelated. Never disable commit signing —
-  if signing blocks the commit, stop and tell the user (state stays saved).
+  review is fine; split only if the fixes are unrelated. Attempt signing for each commit
+  first, including amendments. If that attempt fails,
+  commit unsigned with a command-scoped override and report it. Retry signing for each later
+  commit. Leave repository and global signing defaults unchanged.
 
 ## 6. Push and reply
 
