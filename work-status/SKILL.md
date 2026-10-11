@@ -1,6 +1,6 @@
 ---
 name: work-status
-description: Post a short status of all my current Nutrient work to my Slack DM — open PRs (what needs action), unfinished local branches, in-flight Linear issues and Linear projects that need an update. Runs Mondays 8:30 via launchd; run /work-status any time for a fresh snapshot.
+description: Post a short status of all my current Nutrient work to my Slack DM — open PRs (what needs action), PRs waiting on my review, unfinished local branches, in-flight Linear issues and Linear projects that need an update. Runs Mondays 8:30 via launchd; run /work-status any time for a fresh snapshot.
 user-invocable: true
 argument-hint: "[all]"
 allowed-tools: Bash, Read
@@ -34,6 +34,8 @@ is inline with the helper scripts.
      `cancelled_checks` didn't finish (not a failure). `merge_queue` is the Mergify queue check's
      title for approved PRs. Skip classifying a PR with `detail_missing: true`; list it as
      "couldn't load".
+   - `review_requests` — open PRs by others waiting on my review. `direct` is true when I was
+     asked by name, false when only a team I'm in was asked; `age_days` is since the PR opened.
    - `clones` — clones with uncommitted files.
    - `branches_without_pr` — my branches (named `amit/…`, or started by me under a type prefix like
      `fix/…`; branches named for someone else, like `akshay/…`, are theirs) ahead of the default
@@ -60,6 +62,10 @@ that share a story or need the same thing into one line (a stack of eval PRs is 
 - failing CI: name the `failed_checks`. Only cancelled checks: "re-run <check>", not "failing".
 - changes requested (`review` is `CHANGES_REQUESTED`): "address feedback"
 - a draft with green CI that looks ready: "mark ready"
+
+**Review requests** — PRs others are waiting on me to review, direct requests first, one line
+each: link, author, a few words of title, age. Team-only requests (`direct: false`) collapse into
+one line ("plus N team requests: [#…](…) …"). Skip drafts unless I was asked directly.
 
 **Waiting on others** — ready PRs with no human review yet (`human_reviewers` empty), or reviewed
 but not yet approved, with days idle. Pending CI alone is not waiting on others.

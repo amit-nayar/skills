@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect my open PRs, unfinished local branches and Linear state as JSON.
+"""Collect my open PRs, PRs awaiting my review, unfinished local branches and Linear state as JSON.
 
 Read-only. Usage: gather.py [--all]   (--all: include PRs outside the Nutrient GitHub orgs)
 Needs `gh` auth and LINEAR_API_KEY (source ~/.zprofile first). Any source that fails is listed
@@ -128,6 +128,27 @@ def pr_for_branch(repo, branch):
              "head": prs[0]["headRefOid"]} if prs else None)
 
 
+def review_requests(include_all):
+    """Open PRs waiting on my review. `direct` is False when only a team I'm in was asked."""
+    q = """query($q: String!) { search(query: $q, type: ISSUE, first: 100) { nodes {
+      ... on PullRequest { number title url isDraft createdAt updatedAt author { login }
+        repository { nameWithOwner } } } } }"""
+    found = {}
+    for direct, qualifier in ((False, "review-requested:@me"), (True, "user-review-requested:@me")):
+        raw = run(["gh", "api", "graphql", "-f", f"query={q}",
+                   "-f", f"q=is:pr is:open archived:false {qualifier}"])
+        for p in (json.loads(raw)["data"]["search"]["nodes"] if raw else []):
+            repo = p["repository"]["nameWithOwner"]
+            if repo.lower() in SKIP_REPOS or not (include_all or repo.split("/")[0].lower() in NUTRIENT_ORGS):
+                continue
+            found.setdefault(p["url"], {
+                "repo": repo, "number": p["number"], "title": p["title"], "url": p["url"],
+                "author": (p["author"] or {}).get("login"), "draft": p["isDraft"],
+                "age_days": age_days(p["createdAt"]), "idle_days": age_days(p["updatedAt"]),
+                "direct": False})["direct"] |= direct
+    return sorted(found.values(), key=lambda p: (not p["direct"], -(p["age_days"] or 0)))
+
+
 def pr_state(url):
     raw = run(["gh", "pr", "view", url, "--json", "state"])
     return json.loads(raw)["state"] if raw else None
@@ -247,10 +268,12 @@ def main():
     with ThreadPoolExecutor(8) as ex:
         f_closed = ex.submit(closed_prs, login) if login else None
         f_linear = ex.submit(linear)
+        f_requests = ex.submit(review_requests, include_all)
         prs = list(ex.map(pr_detail, prs_raw))
         clones = list(ex.map(local_branches, repo_dirs()))
         closed = f_closed.result() if f_closed else {}
         lin = f_linear.result()
+        requests = f_requests.result()
 
     open_by_branch = {key(p["repo"], p["branch"]) for p in prs if p["branch"]}
     for p in prs:
@@ -297,7 +320,7 @@ def main():
             for pr in i["prs"]:
                 pr["state"] = known.get(pr["url"])
 
-    json.dump({"complete": not ERRORS, "errors": ERRORS, "prs": prs,
+    json.dump({"complete": not ERRORS, "errors": ERRORS, "prs": prs, "review_requests": requests,
                "clones": [{k: c[k] for k in ("clone", "repo", "head", "dirty_files")} for c in clones
                           if c["dirty_files"]],
                "branches_without_pr": orphans, "linear": lin},
