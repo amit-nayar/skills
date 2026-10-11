@@ -64,9 +64,11 @@ Never check out, stash or reset any clone I work in. Use a detached worktree out
 git -C "$CLONE" fetch origin <branch>
 ```
 
-If the branch exists locally in **any** listed checkout with commits not on
-`origin/<branch>` (`git -C <path> rev-list --count origin/<branch>..<branch>` > 0), I have
-unpushed work there: don't fix, mark the PR's items `needs-amit` ("unpushed local commits").
+If the branch exists locally in **any** listed checkout with commits whose changes aren't on
+`origin/<branch>`, I have unpushed work there: don't fix, mark the PR's items `needs-amit`
+("unpushed local commits"). Use `git -C <path> cherry origin/<branch> <branch>` and count `+`
+lines. A plain `rev-list origin/<branch>..<branch>` also counts the stale pre-rebase copies a
+clone keeps after the branch was rebased and force-pushed elsewhere; `cherry` marks those `-`.
 
 ```bash
 WT="$HOME/Library/Caches/review-sweep/<repo-name>-<number>"
@@ -79,6 +81,15 @@ git -C "$CLONE" worktree add --detach "$WT" "origin/<branch>"
 - Run the narrowest cheap check that covers the change: a formatter, the touched script, one
   unit test class. A fresh worktree has no build outputs, so skip anything that needs a full
   native/SDK build and say so in the reply and the post. Never claim a check you didn't run.
+- Android unit tests: run with `SKIP_NDK_BUILD=true` (as CI does). Tests that load documents
+  then fail with `UnsatisfiedLinkError`, which says nothing about the change. Copy
+  `android/sdk-nutrient/build/intermediates/jniTestLibs/lib/libpspdfkit.dylib` from a clone
+  whose `core/` and `android/sdk-nutrient/src/main/java/com/pspdfkit/internal/jni` match the
+  PR head (`git diff --stat HEAD origin/<branch> -- core/ <jni dir>` is empty). Copy it into
+  the worktree; never build or change anything in that clone. If no clone matches, report
+  which tests couldn't run. When a fix changes what a test asserts, also confirm the test fails
+  without the fix.
+- In zsh, quote `"${REF}:path"`: an unquoted `$REF:a…` is read as a history modifier.
 - Commits: match `git log --oneline -10` on the branch; one commit per PR is fine, split only
   unrelated fixes. Sign first with a time limit, since the 1Password prompt may get no answer:
 
@@ -99,7 +110,8 @@ Don't restack `upstack` PRs either (that force-pushes): list them in the post as
 ## 5. Reply on GitHub
 
 In my voice (`myvoice` skill): short, says what changed and why, names the commit SHA. For
-`replied`, give the evidence in a sentence or two. Don't resolve threads.
+`replied`, give the evidence in a sentence or two. Never promise future work on my behalf
+("I'll add…"); state what's missing instead. Don't resolve threads.
 
 - Thread: `gh api repos/O/R/pulls/N/comments/<reply_to>/replies -f body=...`
 - Review body or top-level comment: `gh pr comment N -R O/R --body ...`, quoting the point.

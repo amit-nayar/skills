@@ -76,6 +76,9 @@ def pending_items(pr, me):
         # The review bot's summary review restates the PR; its findings arrive as threads.
         if who == REVIEW_BOT and "PR Summary" in body.split("\n", 1)[0]:
             continue
+        # Copilot's overview review only summarises; its findings arrive as threads.
+        if who == "copilot-pull-request-reviewer" and ("ccr-overview" in body or "Pull Request Overview" in body):
+            continue
         items.append({"kind": "review", "key": f"review:{r['databaseId']}", "state": r["state"],
                       "reviewer": who, "url": r["url"], "body": body})
 
