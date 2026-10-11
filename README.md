@@ -18,5 +18,6 @@ Personal agent skills and command wrappers.
 - `oft`
 - `pr-private-review`
 - `retrace`
+- `review-sweep`
 - `session-report`
 - `share`
