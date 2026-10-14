@@ -174,7 +174,7 @@ timings, sizes, percentages).
 - Plain words over identifiers. A code identifier (in `code` style) is fine when it is the clearest name for the thing.
 - No mechanism, file names, or repro steps on the bullet line; the PR carries them.
 - Mark open, non-draft, unmerged PRs with bold **RTR** after the link.
-- Slack links use a descriptive label: `thread`, `#android thread`, `Slack handover`.
+- Never show PR numbers. Links are words: `PR`, or a one- or two-word summary per PR when a bullet has several, and `Thread` for a related Slack thread. See the link conventions under Block Kit structure.
 
 **Sub-bullets** (`indent: 1`) are for a second layer of signal only:
 - a finding from a session (root cause, benchmark result, "turned out X had already built this");
@@ -189,23 +189,23 @@ Never add a sub-bullet to restate the PR, and never add one for a small follow-u
 Out for yesterday:
 
 Keyboard handling
-• Made the document and its editing toolbars follow the keyboard's slide animation instead of jumping to the final position; this was the most visible rough edge in the viewer app #58821 #58860 RTR
+• Made the document and its editing toolbars follow the keyboard's slide animation instead of jumping to the final position; this was the most visible rough edge in the viewer app Animation · Toolbars RTR
     ◦ Audited every text-entry surface for the same jump; content editing's bar sync only works by timing luck, left as a follow-up risk
-• Kept the document visible above the keyboard in custom layouts that handle their own window insets #58818
+• Kept the document visible above the keyboard in custom layouts that handle their own window insets PR
 
 Document grid & rendering
-• Fixed a blank flash when scrolling back to an already-rendered page #58865
-• Fixed a background flash and page drift during grid zoom transitions #58803 RTR
+• Fixed a blank flash when scrolling back to an already-rendered page PR
+• Fixed a background flash and page drift during grid zoom transitions PR RTR
 
 Release
 • Decided against backporting two changes into the 11.7 patch: the Instant Comments feature adds public API a patch shouldn't carry, and the grid-zoom fix only exists in Compose-only 12.0 code
 • Settled on the immersive-mode status bar design: a surface-tinted scrim built into the SDK, not left to viewer apps
 
 Website & docs
-• Exposed the latest product versions on the website so Kapa can answer version questions #6025
+• Exposed the latest product versions on the website so Kapa can answer version questions PR
 
 Viewer app
-• Started rebuilding the document tab bar in Compose for Material 3, then dropped it after finding Akshay had already built the same thing #58811
+• Started rebuilding the document tab bar in Compose for Material 3, then dropped it after finding Akshay had already built the same thing PR
 ```
 
 #### Block Kit structure
@@ -217,10 +217,10 @@ cat > "$SCRATCH/outline.md" <<'OUTLINE'
 Out for yesterday:
 
 ## Release 11.7.0
-- Backported the five fixes queued for 11.7.0 onto the release branch and handed a new draft to QA [#58726](https://github.com/PSPDFKit/PSPDFKit/pull/58726) [thread](https://pspdfkit.slack.com/archives/C0C37TMJJ6A/p1790159475183769?thread_ts=1790095447.022169)
+- Backported the five fixes queued for 11.7.0 onto the release branch and handed a new draft to QA [PR](https://github.com/PSPDFKit/PSPDFKit/pull/58726) · [Thread](https://pspdfkit.slack.com/archives/C0C37TMJJ6A/p1790159475183769?thread_ts=1790095447.022169)
 
 ## Sepia page appearance
-- Reworked the sepia tone to match iOS's measured tone curve; paper colour now matches the iOS app [#58678](https://github.com/PSPDFKit/PSPDFKit/pull/58678)
+- Reworked the sepia tone to match iOS's measured tone curve; paper colour now matches the iOS app [PR](https://github.com/PSPDFKit/PSPDFKit/pull/58678)
   - Two variants sit on the branch to test before deciding: two-pass render with a new core flag, or a single pass with no core change
 OUTLINE
 python3 ~/dev/me/skills/oft/scripts/build_message.py "$SCRATCH/outline.md" "$USER_ID" --preview   # eyeball it
@@ -238,8 +238,12 @@ with a blank line between sections. The top-level `text` also contains the full 
 link URLs for notifications and screen readers.
 
 Conventions the outline must follow:
-- PR link label is the number only: `#58726`. Several related PRs: links separated by a space, one **RTR** at the end only if every PR is open, non-draft and unmerged. For mixed sets, put **RTR** immediately after each qualifying PR's link.
-- Slack link labels are descriptive: `thread`, `#design`, `#engineering thread`, `Slack handover`.
+- **Never print PR numbers** (`#58726`, `ansible#96`): they mean nothing to the reader.
+- One PR on a bullet: label it `PR`.
+- Several PRs on a bullet: label each with a one- or two-word summary of what that PR does (`Draft fix`, `Pi proposals`, `Replay fix`, `Version labels`), never `PR 1`/`PR 2` or the repo name.
+- A related Slack thread: label it `Thread`, whatever channel it is in.
+- Separate links with ` · ` (space, middle dot, space). PR links come first, then `Thread`.
+- One **RTR** at the end only if every PR is open, non-draft and unmerged. For mixed sets, put **RTR** immediately after each qualifying PR's link.
 - No emoji.
 
 ### 7. Post to the personal DM

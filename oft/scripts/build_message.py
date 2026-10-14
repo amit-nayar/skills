@@ -10,11 +10,11 @@ Outline format (Markdown subset):
     Out for yesterday:
 
     ## Release 11.7.0
-    - Backported the five queued fixes onto the release branch [#58726](https://github.com/PSPDFKit/PSPDFKit/pull/58726) [thread](https://pspdfkit.slack.com/archives/C.../p...)
+    - Backported the five queued fixes onto the release branch [PR](https://github.com/PSPDFKit/PSPDFKit/pull/58726) · [Thread](https://pspdfkit.slack.com/archives/C.../p...)
       - Sub-bullet: a finding, decision, blocker or next step
 
     ## Sepia page appearance
-    - Reworked the tone to match iOS [#58678](https://github.com/PSPDFKit/PSPDFKit/pull/58678) **RTR**
+    - Reworked the tone to match iOS [PR](https://github.com/PSPDFKit/PSPDFKit/pull/58678) **RTR**
 
 Rules:
 - First non-empty line is the header label (rendered bold).
