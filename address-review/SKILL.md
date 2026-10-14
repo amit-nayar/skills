@@ -88,8 +88,30 @@ git -C "$P" checkout <branch>                 # rank 3: git checkout -b <branch>
 git -C "$P" merge --ff-only origin/<branch>
 ```
 
-If the local branch has commits not on origin, or `--ff-only` fails (diverged), **stop**:
-restore state (step 7) and ask the user. Never force-push, never reset someone's commits.
+If `--ff-only` fails because the branch diverged, check whether the local commits are just
+stale pre-rebase copies of the remote ones. This is common: the branch was rebased and
+force-pushed from another clone, and this checkout still has the old versions.
+
+```bash
+LOCAL_ONLY=$(git -C "$P" log --format='%an%x09%s' origin/<branch>..HEAD | sort)
+REMOTE_ONLY=$(git -C "$P" log --no-merges --format='%an%x09%s' HEAD..origin/<branch> | sort)
+comm -23 <(echo "$LOCAL_ONLY") <(echo "$REMOTE_ONLY")   # empty = every local commit has a remote copy
+```
+
+Reset to the remote without asking only when all of these hold:
+
+- that `comm` output is empty, so every local-only commit has a remote commit with the same
+  author and subject;
+- each local-only commit's committer date is older than its remote copy's;
+- the checkout had no uncommitted changes, or they are already stashed (step 3).
+
+Then `git -C "$P" reset --hard origin/<branch>`, and tell the user the old tip's SHA, which
+stays in the reflog. Content differences between the two copies are fine when they come from
+the rebase onto a newer base.
+
+Otherwise, if the local branch has commits that are not on origin, or the check fails,
+**stop**: restore the state (step 7) and ask the user. Never force-push. Never reset commits
+that exist only locally.
 
 ## 5. Make the fixes
 
