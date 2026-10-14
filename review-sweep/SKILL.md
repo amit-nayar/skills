@@ -1,6 +1,6 @@
 ---
 name: review-sweep
-description: Sweep all my open and draft PRs for review feedback I haven't answered, check each point is actually correct, fix and push the ones that are, reply on GitHub, and post a summary of every change to my Slack DM. Works in throwaway worktrees so no clone I'm using is touched. Runs every evening at 18:00 via launchd; run /review-sweep any time.
+description: Sweep all my open and draft PRs for review feedback I haven't answered, check each point is actually correct, fix and push the ones that are, reply on GitHub, and post a summary of every change to my Slack DM. Works in throwaway worktrees so no clone I'm using is touched. Runs every evening at 20:00 via launchd; run /review-sweep any time.
 ---
 
 # Review sweep
