@@ -1,6 +1,6 @@
 ---
 name: git-spice
-description: Manage stacked branches with the `gs` (git-spice) CLI. Use whenever the user mentions a "stack", asks to branch off the current branch, push/submit a branch, sync with master, or rebase/restack a stack. Distinct from Mergify's `stack` command. Auto-trigger on the words "stack", "submit", "restack", "branch off", "sync" when the current repo is a git-spice repo.
+description: Track and manage dependent PR stacks with the gs (git-spice) CLI, including creating intentional PR continuations, submitting stacks, and restacking. Do not use for standalone branches or PRs, even in a git-spice-enabled repository or when a lone branch is tracked. Distinct from Mergify stack.
 user-invocable: true
 ---
 
@@ -12,14 +12,15 @@ user-invocable: true
 
 ## When this skill applies
 
-Trigger this skill whenever any of these are true:
+Use this skill when the work involves a dependent PR stack:
 
-- The user says "stack", "stacked PR", "submit the stack", "restack", "the stack is broken", "sync the stack", etc.
-- The user asks for a new branch *off the current branch* (a new branch on top of the current one is almost always a stack continuation).
-- The user asks to "push" or "submit" a branch while the current branch is tracked by git-spice.
-- The user asks to rebase a branch on master / trunk and the branch is tracked by git-spice.
+- Creating an intentional continuation of another PR.
+- Tracking or managing branches that form a PR stack.
+- Pushing, submitting, syncing, rebasing, or restacking branches within that stack.
 
-Before doing anything: run `gs ls` (alias for `gs log short`) to see the current stack. If the command errors with "not a git-spice repository", this skill does not apply — fall back to plain git.
+Use plain Git and `gh` for standalone work. Requests to "push", "submit", "branch", or "sync" do not trigger this skill on their own. Neither a git-spice-enabled repository nor a lone tracked branch establishes a PR stack. Do not run `gs ls` solely to handle a standalone PR.
+
+Once stack context is established, run `gs ls` (alias for `gs log short`) to inspect it. If the command errors with "not a git-spice repository", fall back to plain Git.
 
 ## Command cheat sheet
 
@@ -54,7 +55,7 @@ Always pass `--no-prompt` to anything that might prompt unless an interactive ed
 
 ### 1. Detect stack context
 
-When the user mentions stacks, or you are about to push/branch/rebase, first inspect state:
+When the work involves a PR stack or an intentional PR continuation, first inspect state:
 
 ```bash
 gs ls 2>&1                            # current stack with current branch marked
@@ -77,7 +78,7 @@ Keys that matter: `spice.branchCreate.prefix` (auto-prepended to new branch name
 
 ### 2. Create a new branch on top of the stack
 
-When the user asks for "a new branch off this one" or "a branch on top of X", they want a stack continuation, **not** `git checkout -b`. Use:
+When the user wants a dependent PR continuation on top of the current branch, use:
 
 ```bash
 gs bc <branch-name>                    # creates branch on top of current, commits staged changes
@@ -91,7 +92,7 @@ If the user wants the new branch *below* or *inserted into* the stack, use `--be
 
 ### 3. Submitting / pushing the stack
 
-**Never use `git push` for a stack-tracked branch.** Use git-spice instead.
+**Use git-spice to push branches in a dependent PR stack.** For standalone branches, use plain `git push`, even if the branch is tracked by git-spice.
 
 **Prefer `gs ss` (stack submit) over `gs branch submit` whenever the whole stack is yours and clean.** Only `gs ss`/`gs uss` (stack-aware submits) post and keep updated the **stack-navigation comment** on every PR in the stack — a checklist linking all the PRs with `◀` marking which one you're looking at, e.g.:
 
@@ -192,7 +193,7 @@ These both call `git rebase --onto` internally. Same conflict caveat as restack 
 
 ### 8. Tracking / untracking
 
-If the user has a branch that git-spice doesn't know about (e.g., created with `git checkout -b`):
+When adding an existing branch to a dependent PR stack that git-spice does not yet track:
 
 ```bash
 gs btr                            # track current branch (will prompt for base — supply with --base)
@@ -203,7 +204,7 @@ gs buntr                          # stop tracking
 
 ## Rules / Guardrails
 
-- **Never `git push` a tracked branch** — always go through `gs ss` / `gs uss` / `gs branch submit`.
+- **Use `gs ss` / `gs uss` / `gs branch submit` for branches in a dependent PR stack.** Use plain Git and `gh` for standalone work, even if a lone branch is tracked.
 - **Never start an interactive rebase via `gs sr` / `gs usr` / `gs br` when conflicts are possible.** Walk the stack manually with `git rebase --onto` as described above. Only run `gs sr --no-prompt` once the tree is already clean (as a confirmation pass).
 - **Keep hooks enabled unless the user asks otherwise.** `gs ss` respects `--no-verify`, do not pass it unless the user asks.
 - **Attempt signing for every commit.** Try a signed commit first, including amendments. If that attempt fails, create the commit unsigned with a command-scoped override such as `git -c commit.gpgsign=false commit -m "..."`. Attempt signing again for each later commit; one failure does not carry forward. Do not block work or ask for approval after signing fails. For git-spice commands that create commits, propagate a temporary Git configuration to their subprocesses only after the signing attempt fails. Leave repository and global signing defaults unchanged. Report unsigned commits so they can be signed later. Re-signing changes commit IDs and may require restacking and resubmitting affected branches; do that when requested.
