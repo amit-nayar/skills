@@ -42,7 +42,7 @@ Optional date argument: `$ARGUMENTS`
 
 - No argument: **today**.
 - Otherwise a natural-language date ("yesterday", "last friday", "2 days ago", "thursday and friday").
-- **"last business day"**: yesterday, rolled back over the weekend. On Monday this is the preceding Friday.
+- **"last business day"**: yesterday, rolled back over the weekend. Tuesday to Friday this is the previous day. On **Monday** it is the preceding Friday **plus Saturday and/or Sunday, but only a weekend day on which I did any work** (see "Weekend work" below). No weekend work means Friday alone.
 
 ## Steps
 
@@ -77,6 +77,20 @@ SCRATCH=<the session scratchpad directory>   # all intermediate files go here
 The header reflects the **target** day(s), not the current day. **Never name a weekday from
 memory.** Run `date +%A` for today and the `DAY_NAME` command above for each target date, and use
 only those outputs, in the header and in any bullet that mentions a day ("landed Wednesday").
+
+#### Weekend work (Monday runs of "last business day")
+
+Set `TARGET_ISO` to Friday as above, then check Saturday and Sunday (`date -j -v+1d` / `+2d` from Friday)
+for any sign of work: a PR commit authored that day, a Claude session with user text that day
+(`extract_sessions.py <day>` prints at least one real, non-routine session), or a Slack message of mine
+(`search.messages` `on:<day>`). Ignore the routines (OFT, branch cleanup, review sweep, triage report):
+they run on weekdays or are not my work. A weekend day with none of these is dropped.
+
+The target days are then Friday plus each weekend day with work. Run Steps 2 to 4 once per target day
+(`TARGET_ISO` and `NEXT_ISO` for that day) and combine the results before Step 5; treat the weekend work
+as part of the same Out-for post, so a PR opened Saturday and polished Sunday is one story. The
+header is the range form: `Out for Friday & Saturday:`, `Out for Friday & Sunday:` or
+`Out for Friday, Saturday & Sunday:`. Day names still come from `date`, never from memory.
 
 ### 2. Gather GitHub PR activity
 
