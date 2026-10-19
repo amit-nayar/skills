@@ -79,10 +79,27 @@ def pr_detail(pr):
         "failed_checks": failed, "cancelled_checks": cancelled, "pending_checks": pending,
         "merge_queue": merge_queue(repo, d["headRefOid"])
         if d.get("reviewDecision") == "APPROVED" and "Mergify Merge Queue" in latest else None,
+        "unsigned_commits": unsigned_commits(repo, n),
         "idle_days": age_days(pr["updatedAt"]),
         # Review/CI fields are blank when this is true; don't classify the PR from them.
         "detail_missing": not d,
     }
+
+
+def unsigned_commits(repo, n):
+    """Short SHAs of PR commits GitHub doesn't show as verified; the merge queue rejects them.
+
+    None when the lookup failed (unknown, not clean). Covers the last 100 commits.
+    """
+    owner, name = repo.split("/")
+    q = (f'{{repository(owner:"{owner}",name:"{name}"){{pullRequest(number:{n}){{'
+         'commits(last:100){nodes{commit{abbreviatedOid signature{isValid}}}}}}}')
+    raw = run(["gh", "api", "graphql", "-f", f"query={q}",
+               "-q", ".data.repository.pullRequest.commits.nodes"])
+    if not raw:
+        return None
+    return [c["commit"]["abbreviatedOid"] for c in json.loads(raw)
+            if not (c["commit"]["signature"] or {}).get("isValid")]
 
 
 def merge_queue(repo, sha):

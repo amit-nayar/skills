@@ -32,7 +32,8 @@ is inline with the helper scripts.
    - `prs` — open PRs with review/CI/merge state and the clone(s) holding the branch (matched on
      repo + branch). Checks are deduplicated to the newest run: `failed_checks` are real failures,
      `cancelled_checks` didn't finish (not a failure). `merge_queue` is the Mergify queue check's
-     title for approved PRs. Skip classifying a PR with `detail_missing: true`; list it as
+     title for approved PRs. `unsigned_commits` lists short SHAs GitHub doesn't show as verified
+     (`null` = lookup failed, unknown). Skip classifying a PR with `detail_missing: true`; list it as
      "couldn't load".
    - `review_requests` — open PRs by others waiting on my review. `direct` is true when I was
      asked by name, false when only a team I'm in was asked; `age_days` is since the PR opened.
@@ -59,6 +60,9 @@ that share a story or need the same thing into one line (a stack of eval PRs is 
   `merge_queue` title means it's already queued or merging; leave it out unless the title says it
   failed or was dequeued.
 - merge conflicts: "rebase"
+- unsigned commits (`unsigned_commits` non-empty): "re-sign <shas>". List every PR that has
+  them, approved or not: the merge queue won't take them, and fixing them takes a force-push, so
+  flag them early. Put these first.
 - failing CI: name the `failed_checks`. Only cancelled checks: "re-run <check>", not "failing".
 - changes requested (`review` is `CHANGES_REQUESTED`): "address feedback"
 - a draft with green CI that looks ready: "mark ready"
