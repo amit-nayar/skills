@@ -1,6 +1,6 @@
 ---
 name: cleanup-branches
-description: Clean up local git branches across every repo clone under ~/dev/nutrient — merged PRs (gh-poi plus a name-based fallback for branches finished on a different clone), orphan agent-worktree branches, and stale branches nobody here has touched. Posts a summary to Slack.
+description: Clean up local git branches across every repo clone under ~/dev/nutrient — merged PRs (gh-poi plus a name-based fallback for branches finished on a different clone), orphan agent-worktree branches, and stale branches nobody here has touched — plus per-session emulators agent sessions left running. Posts a summary to Slack.
 user-invocable: true
 allowed-tools: Bash
 ---
@@ -44,7 +44,7 @@ default while the branch-name fallback is still being trusted/observed.
 ### 1. Run the cleanup script
 
 ```bash
-~/dev/bin/cleanup-merged-branches.sh $ARGUMENTS
+~/.claude/skills/cleanup-branches/scripts/cleanup-merged-branches.sh $ARGUMENTS
 ```
 
 This sweeps every repo under `~/dev/nutrient` (~24 as of writing) and typically takes
@@ -110,6 +110,30 @@ of them (it is set to the gmail address), so neither can be dropped.
 `CLEANUP_BASE_DIR` overrides the swept directory; it exists so these passes can be
 exercised against a throwaway fixture instead of live repos.
 
+### 1b. Stop left-behind agent emulators
+
+```bash
+~/.claude/skills/cleanup-branches/scripts/cleanup-agent-emulators.sh $ARGUMENTS
+```
+
+Agent sessions boot their own headless emulator with the monorepo's
+`android/tools/testUtils/emulator.sh` (see "Parallel Sessions" in `android/AGENTS.md`). Its AVD
+is named after its port, `pixel_2-<port>`. A session that dies before running
+`emulator.sh delete --port <port>` leaves a qemu process holding 2-5 GB of RAM with no window
+to close it from. This script finds those by AVD name, so hand-made AVDs (`Pixel_2`,
+`Pixel_Fold`, `4gb`) are never touched. It takes seconds and honours `--live` the same way:
+
+- an emulator up longer than `CLEANUP_EMULATOR_MAX_AGE_HOURS` (default 6) is stopped and its
+  AVD deleted;
+- an AVD with no running emulator, untouched for an hour, is deleted;
+- a younger emulator is left alone: a session may still be using it.
+
+```
+EMULATOR_STOPPED|<avd>|<uptime_hours>
+AVD_DELETED|<avd>
+SKIPPED_EMULATOR_YOUNG|<avd>|<uptime_hours>
+```
+
 ### 2. Build the Slack summary
 
 Group by repo. For each repo with any `HASH_MATCH`, `NAME_FALLBACK`, `WORKTREE_ORPHAN`
@@ -124,6 +148,11 @@ be easy to spot:
   — Abdullahi Gbadamosi, 44 days old, fully pushed". This is the pass most likely to
   surprise, so it must never appear as a bare branch name.
 
+Add an **Emulators** group after the repos for any `EMULATOR_STOPPED` or `AVD_DELETED` lines,
+e.g. "`pixel_2-5558` — stopped after 9h, AVD deleted" or "`pixel_2-5560` — AVD deleted (no
+emulator running)". Leave `SKIPPED_EMULATOR_YOUNG` out; it is the normal state of a session
+that is still working.
+
 Skip repos with nothing to report. If `SKIPPED_LOCKED` lines exist, add one trailing
 note per repo naming the locked branches — never delete those, just surface that they
 were seen and left alone. `SKIPPED_ORPHAN_UNMERGED` and `SKIPPED_FOREIGN_UNPUSHED` mean
@@ -132,7 +161,7 @@ standing invitation to look before they get lost.
 
 If the run was a dry-run (no `--live` in `$ARGUMENTS`), title the message
 "Branch cleanup (dry run):" so it's clear nothing was actually deleted. If `--live` was
-passed, title it "Branch cleanup:".
+passed, title it "Branch cleanup:". The emulator script follows the same `--live` flag.
 
 If there is nothing to report at all (no matches anywhere), don't post — same as `oft`.
 
@@ -150,9 +179,12 @@ convention as the `oft` skill — flat single list when only one repo has activi
 
 ## Common Pitfalls
 
-1. **Don't invoke `gh poi` or `git branch -D` directly from this skill** — always go
-   through `cleanup-merged-branches.sh` so the worktree/lock/current-branch safety
-   checks and the name-fallback pass stay in one place.
+1. **Don't invoke `gh poi`, `git branch -D`, `adb emu kill` or `avdmanager delete` directly
+   from this skill** — always go
+   through `cleanup-merged-branches.sh` and `cleanup-agent-emulators.sh` so their safety
+   checks stay in one place. The emulator script matches on the `qemu-system*` executable
+   and a `pixel_2-<digits>` AVD name only: a looser match once killed a shell whose
+   command line merely mentioned such an emulator.
 2. **Don't treat a `NAME_FALLBACK` match as equivalent in confidence to `HASH_MATCH`** —
    call it out distinctly in the Slack message so a wrong match is easy to spot and
    report back.
