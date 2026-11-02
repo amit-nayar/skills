@@ -17,6 +17,9 @@ NOW = datetime.now(timezone.utc)
 # Repos whose branches/PRs are not "my work" for this report (e.g. retired).
 SKIP_REPOS = {"pspdfkit/pspdfkit-website"}
 NUTRIENT_ORGS = {"pspdfkit", "pspdfkit-labs"}
+WEBSITE = "pspdfkit/nutrient-website"
+# Natalye: website copy review, requested with the "needs copy review" label after the content review.
+COPY_REVIEWER = "deutschbitte"
 BOTS = {"nutrient-code-reviewer", "copilot-pull-request-reviewer", "linear-code", "mergify"}
 # CANCELLED is reported separately: a cancelled run didn't finish, it didn't fail.
 FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
@@ -60,7 +63,7 @@ def pr_detail(pr):
     repo, n = pr["repository"]["nameWithOwner"], pr["number"]
     raw = run(["gh", "pr", "view", str(n), "-R", repo, "--json",
                "headRefName,headRefOid,baseRefName,reviewDecision,mergeable,mergeStateStatus,"
-               "latestReviews,statusCheckRollup"])
+               "latestReviews,statusCheckRollup,labels"])
     d = json.loads(raw) if raw else {}
     # Re-runs leave several entries per check; only the newest one counts.
     latest = {}
@@ -83,6 +86,8 @@ def pr_detail(pr):
         "repo": repo, "number": n, "title": pr["title"], "url": pr["url"],
         "draft": pr["isDraft"], "branch": d.get("headRefName"), "base": d.get("baseRefName"),
         "review": d.get("reviewDecision") or "", "human_reviewers": humans,
+        "approved_by": [r["author"]["login"] for r in d.get("latestReviews") or [] if r["state"] == "APPROVED"],
+        "labels": [l["name"] for l in d.get("labels") or []],
         "mergeable": d.get("mergeable"), "merge_state": d.get("mergeStateStatus"),
         "failed_checks": failed, "cancelled_checks": cancelled, "pending_checks": pending,
         # Each failed job: kind infra / real / unknown, its link and the deciding log line.
@@ -307,6 +312,32 @@ def tip_merged(d, repo, branch, tip, pr_head):
     return None
 
 
+def website_copy_state(prs):
+    """Website PRs: where they are in copy review, and the open release they ship with, if any.
+
+    `copy`: "approved" (Natalye approved), "requested" (has "needs copy review"), "skipped" (has
+    "skip copy review"), or "not requested". `release`: the open website release PR whose platform
+    and major.minor version the PR's branch or title names; such PRs wait for that release.
+    """
+    raw = run(["gh", "pr", "list", "-R", WEBSITE, "--state", "open", "--limit", "50",
+               "--json", "number,url,headRefName"])
+    releases = []
+    for r in json.loads(raw or "[]"):
+        if m := re.match(r"release/([a-z-]+?)-(\d+\.\d+)", r["headRefName"]):
+            releases.append({"platform": m.group(1), "version": m.group(2), "url": r["url"], "number": r["number"]})
+    for p in prs:
+        if p["repo"].lower() != WEBSITE or (p["branch"] or "").startswith("release/"):
+            continue  # release PRs ship the release; they don't wait on it or on copy review
+        labels = set(p.get("labels") or [])
+        p["copy"] = ("approved" if COPY_REVIEWER in (p.get("approved_by") or [])
+                     else "requested" if "needs copy review" in labels
+                     else "skipped" if "skip copy review" in labels else "not requested")
+        text = f"{p['branch'] or ''} {p['title']}".lower()
+        p["release"] = next(({"version": r["version"], "url": r["url"]} for r in releases
+                             if r["url"] != p["url"] and r["platform"] in text
+                             and re.search(rf"(?<![\d.]){re.escape(r['version'])}(?![\d])", text)), None)
+
+
 def repo_dirs():
     return sorted(p for p in ROOT.iterdir() if (p / ".git").exists())
 
@@ -408,6 +439,7 @@ def main():
         requests = f_requests.result()
 
     open_by_branch = {key(p["repo"], p["branch"]) for p in prs if p["branch"]}
+    website_copy_state(prs)
     for p in prs:
         p["clones"] = [{"clone": c["clone"], "checked_out": b["checked_out"]}
                        for c in clones if (c["repo"] or "").lower() == p["repo"].lower()

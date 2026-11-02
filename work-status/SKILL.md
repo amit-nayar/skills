@@ -44,6 +44,10 @@ is inline with the helper scripts.
      boot or APK install) or `unknown`, with the job `url` and the log line that decided it.
      `dequeued` is set when Mergify dequeued an approved PR and it hasn't been queued since:
      `failures` are that merge-queue build's jobs, classified the same way.
+     Website PRs (`PSPDFKit/nutrient-website`, not release branches) also have `copy`: "approved"
+     (Natalye, `deutschbitte`, approved), "requested" (`needs copy review` label), "skipped" (`skip
+     copy review` label) or "not requested"; and `release`: the open website release PR (`version`,
+     `url`) the PR ships with, matched on platform and version in its branch or title, else null.
    - `review_requests` — open PRs by others waiting on my review. `direct` is true when I was
      asked by name, false when only a team I'm in was asked; `age_days` is since the PR opened.
    - `clones` — clones with uncommitted files.
@@ -80,6 +84,14 @@ AND-… to Done ([#123](…) merged)", "Re-queued [#123](…), dequeued on infra
 Add a line for each entry in its `errors`.
 
 **Needs action** — PRs where the next move is mine:
+- website PRs follow their own path instead of the queue rule below. Approved by the content
+  reviewer, then copy review by Natalye, then merge:
+  - approved and `copy` is "not requested": "add `needs copy review`" (or `skip copy review` when
+    the change is one or two lines).
+  - `copy` "approved" or "skipped" and approved: "queue it" — unless `release` is set; then it goes
+    under Waiting on others as "ready, waits for the [12.1 release](release url) to publish".
+  - `copy` "requested" without Natalye's approval: Waiting on others, "copy review (Natalye)".
+  Group the website PRs of one release into one line per state.
 - approved and `merge_queue` is "Merge queue is ready" (not queued yet): "queue it". Any other
   `merge_queue` title means it's already queued or merging; leave it out unless the title says it
   failed or was dequeued.
