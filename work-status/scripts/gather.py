@@ -2,10 +2,10 @@
 """Collect my open PRs, PRs awaiting my review, unfinished local branches and Linear state as JSON.
 
 Read-only. Usage: gather.py [--all]   (--all: include PRs outside the Nutrient GitHub orgs)
-Needs `gh` auth and LINEAR_API_KEY (source ~/.zprofile first). Any source that fails is listed
+Needs `gh` auth, LINEAR_API_KEY and BUILDKITE_API_TOKEN (source ~/.zprofile first). Any source that fails is listed
 in `errors` and `complete` is false, so a failure never looks like a quiet week.
 """
-import json, os, re, subprocess, sys, urllib.request
+import json, os, re, subprocess, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,13 +27,19 @@ MY_PREFIXES = {"amit", "amit-nayar"}
 # Release branches carry cherry-picks, so they are always "ahead" but never unfinished work.
 RELEASE = re.compile(r"(-stable$|^release[/-])")
 ERRORS = []
+# gh failures worth retrying: the Monday run regularly loses a few calls to these.
+TRANSIENT = re.compile(r"connection reset|timeout|timed out|EOF|50[234]|TLS handshake", re.I)
 
 
 def run(cmd, cwd=None, expect_fail=False):
     """stdout on success; on failure "" and, unless expected, an entry in ERRORS."""
-    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-    if r.returncode == 0:
-        return r.stdout.strip()
+    for attempt in range(3):
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        if r.returncode == 0:
+            return r.stdout.strip()
+        if not TRANSIENT.search(r.stderr or ""):
+            break
+        time.sleep(2 * (attempt + 1))
     if not expect_fail:
         where = f" (in {Path(cwd).name})" if cwd else ""
         ERRORS.append(f"{' '.join(cmd[:3])}{where}: {(r.stderr or r.stdout).strip()[:200]}")
@@ -66,6 +72,8 @@ def pr_detail(pr):
     checks = [c for _, c in latest.values()]
     failed = [n for n, (_, c) in latest.items()
               if c.get("conclusion") in FAILED or c.get("state") in FAILED]
+    failed_urls = [(n, c.get("targetUrl") or c.get("detailsUrl")) for n, (_, c) in latest.items()
+                   if n in failed]
     cancelled = [n for n, (_, c) in latest.items() if c.get("conclusion") == "CANCELLED"]
     pending = sum(1 for c in checks if c.get("status") in ("IN_PROGRESS", "QUEUED", "PENDING")
                   or c.get("state") in ("PENDING", "EXPECTED"))
@@ -77,6 +85,9 @@ def pr_detail(pr):
         "review": d.get("reviewDecision") or "", "human_reviewers": humans,
         "mergeable": d.get("mergeable"), "merge_state": d.get("mergeStateStatus"),
         "failed_checks": failed, "cancelled_checks": cancelled, "pending_checks": pending,
+        # Each failed job: kind infra / real / unknown, its link and the deciding log line.
+        "ci_failures": classify_failures(failed_urls) if failed else [],
+        "dequeued": dequeue(repo, n) if d.get("reviewDecision") == "APPROVED" else None,
         "merge_queue": merge_queue(repo, d["headRefOid"])
         if d.get("reviewDecision") == "APPROVED" and "Mergify Merge Queue" in latest else None,
         "unsigned_commits": unsigned_commits(repo, n),
@@ -84,6 +95,107 @@ def pr_detail(pr):
         # Review/CI fields are blank when this is true; don't classify the PR from them.
         "detail_missing": not d,
     }
+
+
+BK_API = "https://api.buildkite.com/v2/organizations/pspdfkit"
+BK_JOB = re.compile(r"https://buildkite\.com/pspdfkit/([^/]+)/builds/(\d+)#([0-9a-f-]{36})")
+BK_BUILD = re.compile(r"https://buildkite\.com/pspdfkit/([^/#?]+)/builds/(\d+)(?![#\d])")
+# Failures that say nothing about the code: rate limits, network, lost agents, emulators that
+# never booted (exit 201) or couldn't install the APK (exit 211).
+INFRA = re.compile(r"status code 429|Too Many Requests|Could not (GET|HEAD) '|Connection reset|"
+                   r"connect timed out|Read timed out|No space left on device|[Aa]gent (was )?lost|"
+                   r"TLS handshake|502 Bad Gateway|503 Service Unavailable|"
+                   r"Cannot connect to the Docker daemon|exited with status (201|211)\b")
+# Failures the code caused: failing tests, compile errors, lint and formatting.
+REAL = re.compile(r"tests completed, \d+ failed|There were failing tests|Lint found \d+ errors?|"
+                  r"format violations|^e: |\.(kt|java|cpp|h|mm?|swift|ts|rb):\d+:(\d+:)? error|"
+                  r"\d+ examples?, [1-9]\d* failures?|Compilation failed", re.M)
+ANSI = re.compile(r"\x1b\[[0-9;]*m|_bk;t=\d+|\x1b_|\x07")
+
+
+def bk_get(path, raw=False):
+    token = os.environ.get("BUILDKITE_API_TOKEN")
+    if not token:
+        return None
+    base, _, query = path.partition("?")
+    # Query-parameter auth, token first; header auth is unreliable with this token.
+    url = f"{BK_API}/{base}?access_token={token}" + (f"&{query}" if query else "")
+    try:
+        body = urllib.request.urlopen(url, timeout=60).read().decode("utf-8", "replace")
+    except Exception as e:
+        ERRORS.append(f"buildkite {base}: {e}")
+        return None
+    body = re.sub(r"[\x00-\x08\x0b-\x1f]", "", body)
+    return body if raw else json.loads(body)
+
+
+def classify_job(pipeline, build, job, name):
+    """One failed Buildkite job: infra (rate limit, network, lost agent), real (tests, compile,
+    lint) or unknown, with the line that decided it."""
+    url = f"https://buildkite.com/pspdfkit/{pipeline}/builds/{build}#{job}"
+    log = bk_get(f"pipelines/{pipeline}/builds/{build}/jobs/{job}/log.txt", raw=True)
+    if log is None:
+        return {"check": name, "url": url, "kind": "unknown", "evidence": "log not available"}
+    lines = [ANSI.sub("", l).strip() for l in log.splitlines()]
+    real = next((l for l in lines if REAL.search(l)), None)
+    infra = next((l for l in lines if INFRA.search(l)), None)
+    kind = "real" if real else "infra" if infra else "unknown"
+    return {"check": name, "url": url, "kind": kind, "evidence": (real or infra or "")[:160]}
+
+
+def classify_build(pipeline, build, name):
+    """Failed command jobs of a build whose check had no job link. Trigger steps are skipped:
+    their child builds report as checks of their own."""
+    b = bk_get(f"pipelines/{pipeline}/builds/{build}")
+    if not b:
+        return [{"check": name, "url": f"https://buildkite.com/pspdfkit/{pipeline}/builds/{build}",
+                 "kind": "unknown", "evidence": "build not available"}]
+    return [classify_job(pipeline, build, j["id"], j.get("name") or name)
+            for j in b.get("jobs") or []
+            if j.get("type") == "script" and j.get("state") == "failed"][:4]
+
+
+def classify_failures(urls):
+    """[(check name, url)] of failed checks -> classified failures, one per failed job."""
+    jobs = {(m.group(1), m.group(2), m.group(3)): n for n, u in urls if (m := BK_JOB.match(u or ""))}
+    covered = {(p, b) for p, b, _ in jobs}
+    builds = {(m.group(1), m.group(2)): n for n, u in urls
+              if not BK_JOB.match(u or "") and (m := BK_BUILD.match(u or "")) and (m.group(1), m.group(2)) not in covered}
+    out = [classify_job(p, b, j, n) for (p, b, j), n in jobs.items()]
+    for (p, b), n in builds.items():
+        out += classify_build(p, b, n)
+    out += [{"check": n, "url": u, "kind": "unknown", "evidence": ""} for n, u in urls
+            if u and not BK_BUILD.match(u) and not BK_JOB.match(u)]
+    return out
+
+
+def dequeue(repo, n):
+    """Set when Mergify's latest state for the PR is "dequeued": the failed merge-queue build's
+    jobs, classified. None when the PR was never dequeued or is queued again."""
+    raw = run(["gh", "api", f"repos/{repo}/issues/{n}/comments?per_page=100",
+               "-q", '[.[] | {user: .user.login, body, html_url, created_at, updated_at}]'])
+    if not raw:
+        return None
+    comments = json.loads(raw)
+    payloads = []
+    for c in comments:
+        if c["user"] == "mergify[bot]" and (m := re.search(r"-\*- Mergify Payload -\*-\s*(\{.*?\})\s*-\*- Mergify Payload End", c["body"], re.S)):
+            payloads.append((c["updated_at"], json.loads(m.group(1))))
+    if not payloads or max(payloads, key=lambda p: p[0])[1].get("state") != "dequeued":
+        return None
+    summaries = [c for c in comments if "nutrient-mergify-failed-builds" in c["body"]]
+    if not summaries:
+        return {"summary_url": None, "failures": []}
+    last = summaries[-1]
+    # Mergify leaves its comment at "dequeued" after a re-queue, so a queue command or checkbox
+    # tick newer than the failure summary means it's queued again.
+    requeued = [c for c in comments if c["created_at"] > last["created_at"]
+                and (re.match(r"\s*@mergifyio (re)?queue", c["body"]) or "[x] Queue this pull request" in c["body"])]
+    if requeued:
+        return None
+    urls = [("merge queue", u) for u in re.findall(r"https://buildkite\.com/pspdfkit/[^\s)\]|]+", last["body"])
+            if not u.startswith("https://buildkite.com/pspdfkit/pspdfkit/")]
+    return {"summary_url": last["html_url"], "failures": classify_failures(urls)}
 
 
 def unsigned_commits(repo, n):
@@ -166,9 +278,9 @@ def review_requests(include_all):
     return sorted(found.values(), key=lambda p: (not p["direct"], -(p["age_days"] or 0)))
 
 
-def pr_state(url):
-    raw = run(["gh", "pr", "view", url, "--json", "state"])
-    return json.loads(raw)["state"] if raw else None
+def pr_info(url):
+    raw = run(["gh", "pr", "view", url, "--json", "state,title,headRefName"])
+    return json.loads(raw) if raw else None
 
 
 def tip_merged(d, repo, branch, tip, pr_head):
@@ -231,7 +343,9 @@ def local_branches(d):
         out.append({"branch": name, "mine": is_mine(d, name, default and f"origin/{default}", author.strip("<>"), emails), "push_state": push,
                     "ahead_of_default": int(ahead) if ahead else None, "idle_days": age_days(date),
                     "checked_out": name == head, "tip": tip})
-    return {"clone": d.name, "path": d, "repo": origin_repo(d), "head": head or "(detached)",
+    # Worktrees share refs with their main clone; the common dir tells them apart.
+    common = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], d, expect_fail=True)
+    return {"clone": d.name, "path": d, "repo": origin_repo(d), "head": head or "(detached)", "common": common or str(d),
             "dirty_files": dirty, "branches": out}
 
 
@@ -241,8 +355,8 @@ def linear():
         ERRORS.append("linear: LINEAR_API_KEY not set")
         return None
     q = """{ viewer { assignedIssues(first:100, filter:{state:{type:{in:["started","unstarted"]}}}) {
-      nodes { identifier title url updatedAt state{name type}
-        attachments(first:10){nodes{url}} } } }
+      nodes { id identifier title url updatedAt state{name type} team{id}
+        attachments(first:50, filter:{url:{contains:"/pull/"}}){nodes{url}} } } }
       projects(first:50, filter:{lead:{isMe:{eq:true}}}) { nodes { name url health
         status{type} projectUpdates(first:1){nodes{createdAt}} } } }"""
     req = urllib.request.Request("https://api.linear.app/graphql", json.dumps({"query": q}).encode(),
@@ -261,12 +375,13 @@ def linear():
         # Strip "#pullrequestreview-…" and "/files" so each PR appears once.
         prs = sorted({m.group(0) for a in i["attachments"]["nodes"]
                       if (m := re.match(r"https://github\.com/[^/]+/[^/]+/pull/\d+", a["url"]))})
-        issues.append({"id": i["identifier"], "title": i["title"], "url": i["url"],
+        issues.append({"id": i["identifier"], "uuid": i["id"], "team_id": i["team"]["id"],
+                       "title": i["title"], "url": i["url"],
                        "state": i["state"]["name"], "type": i["state"]["type"],
                        "idle_days": age_days(i["updatedAt"]), "prs": [{"url": u} for u in prs]})
     projects = []
     for p in d["projects"]["nodes"]:
-        if p["status"]["type"] in ("completed", "canceled"):
+        if p["status"]["type"] in ("backlog", "completed", "canceled"):
             continue
         last = p["projectUpdates"]["nodes"]
         projects.append({"name": p["name"], "url": p["url"], "health": p["health"],
@@ -303,6 +418,15 @@ def main():
                   if b["mine"] and b["ahead_of_default"] != 0
                   and c["repo"] and c["repo"].lower() not in SKIP_REPOS
                   and key(c["repo"], b["branch"]) not in open_by_branch]
+    # A branch shows up in every worktree of its clone: keep one entry, preferring the checkout
+    # that has it checked out, then the main clone.
+    best = {}
+    for c, b in candidates:
+        k = (c["common"], b["branch"])
+        rank = (b["checked_out"], Path(c["common"]).parent == c["path"])
+        if k not in best or rank > best[k][0]:
+            best[k] = (rank, c, b)
+    candidates = [(c, b) for _, c, b in best.values()]
     # Look up a PR for gone branches the closed search didn't cover: a deleted remote is not
     # proof of a merge (a closed, unmerged PR can still leave work behind).
     missing = {key(c["repo"], b["branch"]): (c["repo"], b["branch"]) for c, b in candidates
@@ -327,15 +451,18 @@ def main():
                                     | ({"tip_covered": covered} if last["state"] == "MERGED" else {})
                                     if last else None)})
 
-    # Linear-linked PR states, so a status mismatch can be flagged without guessing.
+    # Linear-linked PR states, so a status mismatch can be flagged without guessing. `for_issue`
+    # is whether the PR names the issue in its title or branch; a merged PR that doesn't (say, a
+    # prerequisite from another issue) says nothing about this issue's state.
     if lin:
-        known = {p["url"]: "OPEN" for p in prs} | {v["url"]: v["state"] for v in closed.values()}
-        unknown = sorted({pr["url"] for i in lin["issues"] for pr in i["prs"]} - known.keys())
+        urls = sorted({pr["url"] for i in lin["issues"] for pr in i["prs"]})
         with ThreadPoolExecutor(8) as ex:
-            known |= dict(zip(unknown, ex.map(pr_state, unknown)))
+            info = dict(zip(urls, ex.map(pr_info, urls)))
         for i in lin["issues"]:
             for pr in i["prs"]:
-                pr["state"] = known.get(pr["url"])
+                d = info.get(pr["url"])
+                pr["state"] = d and d["state"]
+                pr["for_issue"] = d and i["id"].lower() in f'{d["title"]} {d["headRefName"]}'.lower()
 
     json.dump({"complete": not ERRORS, "errors": ERRORS, "prs": prs, "review_requests": requests,
                "clones": [{k: c[k] for k in ("clone", "repo", "head", "dirty_files")} for c in clones

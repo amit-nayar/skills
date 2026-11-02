@@ -1,6 +1,6 @@
 ---
 name: work-status
-description: Post a short status of all my current Nutrient work to my Slack DM — open PRs (what needs action), PRs waiting on my review, unfinished local branches, in-flight Linear issues and Linear projects that need an update. Runs Mondays 8:30 via launchd; run /work-status any time for a fresh snapshot.
+description: Post a short status of all my current Nutrient work to my Slack DM — open PRs (what needs action), PRs waiting on my review, unfinished local branches, in-flight Linear issues and Linear projects that need an update. Fixes Linear PR links and states and re-queues PRs dequeued on infra failures itself. Runs Mondays and Thursdays 8:30 via launchd; run /work-status any time for a fresh snapshot.
 user-invocable: true
 argument-hint: "[all]"
 allowed-tools: Bash, Read
@@ -8,8 +8,13 @@ allowed-tools: Bash, Read
 
 # Work status
 
-A concise "where is everything" snapshot, posted to my personal Slack DM. Read-only: never touch
-GitHub, Linear or any branch. Skimmable in 30 seconds; every line says what, where, and the action.
+A concise "where is everything" snapshot, posted to my personal Slack DM. Skimmable in 30 seconds;
+every line says what and the action.
+
+It changes things only through `act.py`, and only these: links a PR to a Linear issue, moves a
+Linear issue to Done when its own PRs merged, and re-queues an approved PR Mergify dequeued when
+that merge-queue build's failures don't look real. Everything else is report-only: never queue a PR
+that wasn't queued before, never re-run CI, never touch a branch.
 
 **Do not end the turn until the Slack post has gone out.** No background agents (a routine run that
 ends with one still running is killed after 600s and reports success with nothing posted). Everything
@@ -34,7 +39,11 @@ is inline with the helper scripts.
      `cancelled_checks` didn't finish (not a failure). `merge_queue` is the Mergify queue check's
      title for approved PRs. `unsigned_commits` lists short SHAs GitHub doesn't show as verified
      (`null` = lookup failed, unknown). Skip classifying a PR with `detail_missing: true`; list it as
-     "couldn't load".
+     "couldn't load". `ci_failures` has one entry per failed Buildkite job: `kind` is `real` (failing
+     tests, compile errors, lint, formatting), `infra` (rate limits, network, lost agents, emulator
+     boot or APK install) or `unknown`, with the job `url` and the log line that decided it.
+     `dequeued` is set when Mergify dequeued an approved PR and it hasn't been queued since:
+     `failures` are that merge-queue build's jobs, classified the same way.
    - `review_requests` — open PRs by others waiting on my review. `direct` is true when I was
      asked by name, false when only a team I'm in was asked; `age_days` is since the PR opened.
    - `clones` — clones with uncommitted files.
@@ -46,14 +55,29 @@ is inline with the helper scripts.
    - `linear` — assigned issues (each linked PR with its `state`: OPEN / MERGED / CLOSED) and
      projects I lead. `null` if Linear failed (see `errors`).
 
-2. Write the outline (format below) and post it (see Post). If `gather.py` itself crashes, post
+2. Make the routine fixes:
+
+   ```bash
+   python3 ~/dev/me/skills/work-status/scripts/act.py "$SCRATCH/status.json" > "$SCRATCH/done.json"
+   ```
+
+   `done` lists what it changed, `errors` what it tried and couldn't. Items it fixed don't also go
+   in the sections below (a linked issue isn't "no PR linked" any more; a re-queued PR isn't
+   "dequeued").
+
+3. Write the outline (format below) and post it (see Post). If `gather.py` itself crashes, post
    `Work status: snapshot failed — <error>` rather than nothing.
 
 ## What goes in the post
 
-Header `Work status:`, then only the sections that have something. One line per item, a link, and
-where it lives as `clone · branch`. Add `(dirty)` when that clone has uncommitted files. Group PRs
-that share a story or need the same thing into one line (a stack of eval PRs is one line, not nine).
+Header `Work status:`, then only the sections that have something. One line per item with a link.
+Add where the branch lives (`clone · branch`, plus `(dirty)` when that clone has uncommitted files)
+only when the action needs a checkout: rebase, re-sign, or a real CI failure to fix. Group PRs that
+share a story or need the same thing into one line (a stack of eval PRs is one line, not nine).
+
+**Done for you** — first, one line per `done.json` entry: "Linked [#123](…) to AND-…", "Moved
+AND-… to Done ([#123](…) merged)", "Re-queued [#123](…), dequeued on infra failures ([summary](…))".
+Add a line for each entry in its `errors`.
 
 **Needs action** — PRs where the next move is mine:
 - approved and `merge_queue` is "Merge queue is ready" (not queued yet): "queue it". Any other
@@ -63,7 +87,13 @@ that share a story or need the same thing into one line (a stack of eval PRs is 
 - unsigned commits (`unsigned_commits` non-empty): "re-sign <shas>". List every PR that has
   them, approved or not: the merge queue won't take them, and fixing them takes a force-push, so
   flag them early. Put these first.
-- failing CI: name the `failed_checks`. Only cancelled checks: "re-run <check>", not "failing".
+- failing CI: one line per PR, split by `ci_failures` kind and linking each job: "real: [lint](job
+  url), [unit tests](…)" — fix these; "infra: [lint](…) (Maven Central 429)" — say in a few words
+  what the evidence shows, nothing for me to fix but a re-run; "unknown: [check](…)" — look. A PR
+  whose failures are all infra goes in one collapsed line at the end of the section ("Infra-only
+  failures, re-run when ready: [#…](…) [#…](…)"). Only cancelled checks: "re-run <check>".
+- dequeued and `act.py` didn't re-queue it (a failure was real or unknown): "dequeued on
+  [real failure](job url) — fix, then queue".
 - changes requested (`review` is `CHANGES_REQUESTED`): "address feedback"
 - a draft with green CI that looks ready: "mark ready"
 
@@ -74,26 +104,27 @@ one line ("plus N team requests: [#…](…) …"). Skip drafts unless I was ask
 **Waiting on others** — ready PRs with no human review yet (`human_reviewers` empty), or reviewed
 but not yet approved, with days idle. Pending CI alone is not waiting on others.
 
-**Drafts in progress** — drafts not otherwise listed, with days idle.
+**Drafts in progress** — drafts not otherwise listed. Drafts with activity in the last 7 days get
+a line each; the rest collapse into one line of links: "Also idle: [#…](…) 13d, [#…](…) 20d".
+Drafts idle over 30 days add "— close or revive?".
 
-**Stale** — anything (PR, branch, issue) idle more than 30 days: "close or revive?". Collapse
-into a single line when several.
-
-**Local branches without a PR** — from `branches_without_pr`, with `clone · branch`, idle days, and
-the push state in words ("never pushed", "unpushed commits", "remote deleted"). When `last_pr` is a
-closed (unmerged) PR, link it: "PR [#123](…) closed unmerged — drop or reopen?". When it is
-`MERGED`, check `last_pr.tip_covered`: `false` means commits were added after that merge ("new
-commits since [#123](…) merged"); `null` means it couldn't be verified ("[#123](…) merged, not sure
-whether the branch has newer commits"). Never claim new work from `null`. Also mention
-clones with uncommitted files that aren't explained by a PR above.
+**Unfinished branches** — from `branches_without_pr`, oldest first, at most 5 lines plus "+N more".
+Each line: `clone · branch`, idle days, and the push state in words ("never pushed", "unpushed
+commits", "remote deleted"). When `last_pr` is a closed (unmerged) PR, link it: "PR [#123](…)
+closed unmerged — drop or reopen?". When it is `MERGED`, check `last_pr.tip_covered`: `false` means
+commits were added after that merge ("new commits since [#123](…) merged"); `null` means it couldn't
+be verified ("[#123](…) merged, not sure whether the branch has newer commits"). Never claim new
+work from `null`. Group branches of one effort into one line. Don't list dirty clones on their own.
 
 **Linear** — in-flight issues (type `started`) with no PR link, or whose linked PRs are all
 `MERGED`/`CLOSED`, so the status is probably wrong (use each PR's `state`; a `null` state is unknown,
-not closed); `unstarted` issues untouched for a long time can be one summary line. Skip
+not closed). Don't list `unstarted` issues for being untouched: Todo sitting is normal. Skip
 issues already covered by a PR line above (cross-reference by PR url) except to flag a state
-mismatch (e.g. PR merged but issue still In Review).
+mismatch (e.g. PR merged but issue still In Review). Only PRs with `for_issue: true` say anything
+about an issue's state: a merged PR that doesn't name the issue (a prerequisite from another issue)
+is not a reason to move it. Never call an issue "no PR linked" without checking its `prs` list.
 **Projects needing an update** — projects I lead with `days_since_update` over 14 or null, one line
-each with the project link.
+each with the project link. `gather.py` already drops backlog, completed and canceled projects.
 
 Judgement calls: leave out PRs that need nothing and are fresh unless they matter; don't repeat the
 PR title when the number plus a few words say it; no emoji, no padding. If everything is quiet
