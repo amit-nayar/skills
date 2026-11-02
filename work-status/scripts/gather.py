@@ -433,6 +433,8 @@ def main():
         f_linear = ex.submit(linear)
         f_requests = ex.submit(review_requests, include_all)
         prs = list(ex.map(pr_detail, prs_raw))
+        # Release PRs into a stable branch merge without review as part of the release; nothing to report.
+        prs = [p for p in prs if not ((p["branch"] or "").startswith("release/") and (p["base"] or "").endswith("-stable"))]
         clones = list(ex.map(local_branches, repo_dirs()))
         closed = f_closed.result() if f_closed else {}
         lin = f_linear.result()

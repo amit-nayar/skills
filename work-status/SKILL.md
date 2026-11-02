@@ -34,7 +34,8 @@ is inline with the helper scripts.
    - `complete` / `errors` — if `complete` is false, some source failed (gh auth, rate limit,
      Linear). Start the post with `Snapshot incomplete: <errors, briefly>` and never say
      "everything is quiet" — missing data is not an empty queue.
-   - `prs` — open PRs with review/CI/merge state and the clone(s) holding the branch (matched on
+   - `prs` — open PRs with review/CI/merge state (release PRs from `release/…` into a `*-stable`
+     branch are left out: they merge without review as part of the release) and the clone(s) holding the branch (matched on
      repo + branch). Checks are deduplicated to the newest run: `failed_checks` are real failures,
      `cancelled_checks` didn't finish (not a failure). `merge_queue` is the Mergify queue check's
      title for approved PRs. `unsigned_commits` lists short SHAs GitHub doesn't show as verified
