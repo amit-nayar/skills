@@ -1,6 +1,6 @@
 ---
 name: cleanup-branches
-description: Clean up local git branches across every repo clone under ~/dev/nutrient — merged PRs (gh-poi plus a name-based fallback for branches finished on a different clone), orphan agent-worktree branches, and stale branches nobody here has touched — plus per-session emulators agent sessions left running. Posts a summary to Slack.
+description: Clean up local git branches across every repo clone under ~/dev/nutrient — merged PRs (gh-poi plus a name-based fallback for branches finished on a different clone), orphan agent-worktree branches, and stale branches nobody here has touched — plus per-session emulators agent sessions left running. Posts a summary to Slack. The scheduled run lives in /work-status cleanup (Mon/Thu 8:00), which posts it as a thread reply.
 user-invocable: true
 allowed-tools: Bash
 ---

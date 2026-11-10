@@ -1,8 +1,8 @@
 ---
 name: work-status
-description: Post a short status of all my current Nutrient work to my Slack DM — open PRs (what needs action), PRs waiting on my review, unfinished local branches, in-flight Linear issues and Linear projects that need an update. Fixes Linear PR links and states and re-queues PRs dequeued on infra failures itself. Runs Mondays and Thursdays 8:30 via launchd; run /work-status any time for a fresh snapshot.
+description: Post a short status of all my current Nutrient work to my Slack DM — open PRs (what needs action), PRs waiting on my review, unfinished local branches, in-flight Linear issues and Linear projects that need an update. Fixes Linear PR links and states and re-queues PRs dequeued on infra failures itself. Runs Mondays and Thursdays 8:00 via launchd with `cleanup`, which also runs the branch cleanup and posts its results as a thread reply; run /work-status any time for a fresh snapshot.
 user-invocable: true
-argument-hint: "[all]"
+argument-hint: "[all] [cleanup]"
 allowed-tools: Bash, Read
 ---
 
@@ -14,13 +14,27 @@ every line says what and the action.
 It changes things only through `act.py`, and only these: links a PR to a Linear issue, moves a
 Linear issue to Done when its own PRs merged, and re-queues an approved PR Mergify dequeued when
 that merge-queue build's failures don't look real. Everything else is report-only: never queue a PR
-that wasn't queued before, never re-run CI, never touch a branch.
+that wasn't queued before, never re-run CI, never touch a branch (the `cleanup` run's branch deletions go through the
+cleanup-branches scripts only).
 
 **Do not end the turn until the Slack post has gone out.** No background agents (a routine run that
 ends with one still running is killed after 600s and reports success with nothing posted). Everything
 is inline with the helper scripts.
 
 ## Steps
+
+0. Only when invoked with `cleanup` (the scheduled run): run the branch cleanup first, so the
+   status below doesn't list branches it is about to delete. Follow Step 1 and 1b of
+   `~/dev/me/skills/cleanup-branches/SKILL.md` with `--live`, in the foreground with a 600000ms
+   timeout (the sweep takes 5-7 minutes), and keep the output:
+
+   ```bash
+   set -a && . ~/.zprofile >/dev/null 2>&1; set +a
+   { ~/dev/me/skills/cleanup-branches/scripts/cleanup-merged-branches.sh --live
+     ~/dev/me/skills/cleanup-branches/scripts/cleanup-agent-emulators.sh --live; } > "$SCRATCH/cleanup.txt" 2>&1
+   ```
+
+   If it fails, carry on with the status and say so in the cleanup thread reply (see Post).
 
 1. Gather (takes ~10s). PRs are limited to the Nutrient GitHub orgs (`PSPDFKit`, `PSPDFKit-labs`);
    when invoked as `/work-status all`, add `--all` to include personal and other repos too.
@@ -157,9 +171,29 @@ OUTLINE
 USER_ID=$(curl -s https://slack.com/api/auth.test --header "Authorization: Bearer $SLACK_API_TOKEN_OFT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["user_id"])')
 python3 ~/dev/me/skills/oft/scripts/build_message.py "$SCRATCH/outline.md" "$USER_ID" --preview
 python3 ~/dev/me/skills/oft/scripts/build_message.py "$SCRATCH/outline.md" "$USER_ID" > "$SCRATCH/status-msg.json"
-curl -s https://slack.com/api/chat.postMessage --header "Authorization: Bearer $SLACK_API_TOKEN_OFT" --header "Content-Type: application/json; charset=utf-8" --data @"$SCRATCH/status-msg.json"
+curl -s https://slack.com/api/chat.postMessage --header "Authorization: Bearer $SLACK_API_TOKEN_OFT" --header "Content-Type: application/json; charset=utf-8" --data @"$SCRATCH/status-msg.json" | tee "$SCRATCH/status-resp.json"
 ```
 
 Outline rules are the same as `oft`: `## Name` sections, `- ` bullets, inline `[label](url)`,
 PR link label is the number only. Check `"ok": true`, and include the `--preview` text in the reply so
 a routine log shows what was posted.
+
+### Cleanup thread reply (only with `cleanup`)
+
+After the status post succeeds, reply in its thread with the cleanup results. Build the outline
+from `$SCRATCH/cleanup.txt` by the rules in Step 2 of `~/dev/me/skills/cleanup-branches/SKILL.md`
+(group by repo as `## <repo>` sections, annotate `NAME_FALLBACK`, `WORKTREE_ORPHAN` and
+`FOREIGN_STALE`, an Emulators section, then locked and skipped-unpushed notes), titled "Branch
+cleanup:". If the sweep reported nothing, still reply with one line, "Branch cleanup: nothing to
+remove"; if it failed or every repo came back empty, say that instead (an all-empty sweep usually
+means a broken PATH, not a clean tree).
+
+```bash
+TS=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["ts"])' "$SCRATCH/status-resp.json")  # save the status post's response here
+python3 ~/dev/me/skills/oft/scripts/build_message.py "$SCRATCH/cleanup-outline.md" "$USER_ID" --preview
+python3 ~/dev/me/skills/oft/scripts/build_message.py "$SCRATCH/cleanup-outline.md" "$USER_ID" \
+  | python3 -c 'import json,sys;m=json.load(sys.stdin);m["thread_ts"]=sys.argv[1];print(json.dumps(m))' "$TS" > "$SCRATCH/cleanup-msg.json"
+curl -s https://slack.com/api/chat.postMessage --header "Authorization: Bearer $SLACK_API_TOKEN_OFT" --header "Content-Type: application/json; charset=utf-8" --data @"$SCRATCH/cleanup-msg.json"
+```
+
+Check `"ok": true` here too.
