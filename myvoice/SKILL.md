@@ -14,6 +14,7 @@ Do not imitate Amit's personal habits, such as abbreviations, emoji, lowercase s
 - Use short sentences and plain, common words. Put one idea in each sentence.
 - Avoid complex sentence structure: no stacked clauses, no semicolons, no parenthetical asides inside a sentence.
 - State the fact and stop. Avoid rhetorical build-up, ornament, and intensifiers such as "significantly", "robust" or "seamless".
+- No filler transitions at the start of a sentence, such as "With that,", "That said,", "That way," or "Overall,". Start with the point.
 - Explain internal terms and codenames in plain language when the audience may not know them.
 - Read the draft aloud mentally. If it sounds like an essay or a press release instead of a message to a colleague, shorten it.
 - Never use em dashes or en dashes. Use a full stop, a comma, or a `because`, `since` or `so` clause instead.
