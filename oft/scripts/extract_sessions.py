@@ -20,7 +20,8 @@ import re
 import sys
 import zoneinfo
 
-PR_RE = re.compile(r"#\d{4,6}|\b(?:AND|IOS|WEBL|COREL|SERL|HYB|AI)-\d+\b")
+PR_RE = re.compile(r"#\d{4,6}|\b(?:AND|IOS|WEBL|COREL|SERL|HYB|AI)-\d+\b"
+                   r"|https://[\w-]+\.slack\.com/archives/[A-Z0-9]+/p\d{16}(?:\?thread_ts=\d+\.\d+)?")
 
 
 def text_of(msg):

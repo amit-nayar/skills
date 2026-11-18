@@ -49,6 +49,33 @@ class MessageTests(unittest.TestCase):
         inline = lists[0]["elements"][0]["elements"]
         self.assertIn({"type": "link", "url": url, "text": "#12345"}, inline)
 
+    def test_discussions_bullet_without_thread_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            outline = Path(directory) / "outline.md"
+            outline.write_text("Out for today:\n\n## Discussions\n- Set up a Linear project for a customer\n")
+            result = subprocess.run(
+                [sys.executable, "-B", str(SCRIPTS / "build_message.py"), outline, "U_TEST"],
+                capture_output=True, text=True,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Discussions bullet has no [Thread]", result.stderr)
+
+    def test_discussions_bullet_with_thread_passes_and_unlinked_bullet_warns(self):
+        thread = "https://pspdfkit.slack.com/archives/C0273MG80J2/p1794981240486279"
+        with tempfile.TemporaryDirectory() as directory:
+            outline = Path(directory) / "outline.md"
+            outline.write_text(
+                "Out for today:\n\n## SDK\n- Fixed keyboard handling\n\n"
+                f"## Discussions\n- Split the customer asks [Thread]({thread})\n"
+            )
+            result = subprocess.run(
+                [sys.executable, "-B", str(SCRIPTS / "build_message.py"), outline, "U_TEST"],
+                capture_output=True, text=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("warning: bullet has no link", result.stderr)
+        self.assertNotIn("Split the customer asks", result.stderr)
+
 
 class SessionTests(unittest.TestCase):
     def test_digest_keeps_refs_beyond_truncation_and_filters_local_day(self):
@@ -57,6 +84,8 @@ class SessionTests(unittest.TestCase):
              "message": {"content": "Investigate keyboard handling"}},
             {"type": "assistant", "timestamp": "2026-09-24T12:00:00Z",
              "message": {"content": [{"type": "text", "text": "x" * 310 + " #12345 AND-123"}]}},
+            {"type": "assistant", "timestamp": "2026-09-24T13:00:00Z",
+             "message": {"content": "See https://pspdfkit.slack.com/archives/C0273MG80J2/p1794981240486279?thread_ts=1794981000.000100 for context"}},
             {"type": "assistant", "timestamp": "2026-09-24T22:30:00Z",
              "message": {"content": "Next day #54321"}},
         ]
@@ -71,8 +100,9 @@ class SessionTests(unittest.TestCase):
                 "extract_sessions.py", "2026-09-24", "--root", directory,
                 "--tz", "Europe/Vienna", "--max-chars", "300",
             )
-        self.assertIn("2 msgs on 2026-09-24", digest)
-        self.assertIn("refs: #12345 AND-123", digest)
+        self.assertIn("3 msgs on 2026-09-24", digest)
+        self.assertIn("refs: #12345 AND-123 https://pspdfkit.slack.com/archives/C0273MG80J2/"
+                      "p1794981240486279?thread_ts=1794981000.000100", digest)
         self.assertIn("x" * 300 + " …", digest)
         self.assertNotIn("x" * 301, digest)
         self.assertNotIn("#54321", digest)

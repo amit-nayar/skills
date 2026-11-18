@@ -21,6 +21,11 @@ Rules:
 - `## Name` starts a section (bold header with a blank line before it). Omit sections for a flat list.
 - `- ` starts a bullet; two leading spaces (`  - `) make it a sub-bullet.
 - Inline: `[label](url)` link, `` `code` `` code style, `**text**` bold.
+
+Link checks (stderr):
+- A top-level bullet in a `Discussions` section without a `[Thread](https://<team>.slack.com/archives/...)`
+  link is an error: the post is not built.
+- Any other top-level bullet with no link at all prints a warning: look for its related thread.
 """
 import json
 import re
@@ -58,6 +63,18 @@ def plain(text):
     return {"type": "text", "text": text}
 
 
+SLACK_THREAD = re.compile(r"\[Thread\]\(https://[\w-]+\.slack\.com/archives/")
+
+
+def check_links(section_name, text):
+    if section_name and section_name.lower() == "discussions":
+        if not SLACK_THREAD.search(text):
+            return "error", f"Discussions bullet has no [Thread](slack permalink) link: {text!r}"
+    elif "](" not in text:
+        return "warning", f"bullet has no link; add its related Slack thread if one exists: {text!r}"
+    return None, None
+
+
 def build(outline):
     lines = [l.rstrip() for l in outline.splitlines()]
     lines = [l for l in lines if l.strip()]
@@ -66,6 +83,8 @@ def build(outline):
     elements = []
     pending_header = [bold(header)]          # first section carries the label and maybe the first header
     current = None                            # current rich_text_list (indent 0 or 1)
+    section_name = None
+    errors = []
 
     def flush_header():
         nonlocal pending_header
@@ -84,6 +103,7 @@ def build(outline):
     for raw in body:
         if raw.startswith("## "):
             name = raw[3:].strip()
+            section_name = name
             current = None
             if pending_header is not None:      # header label + first section share one block
                 pending_header += [plain("\n\n"), bold(name), plain("\n")]
@@ -91,10 +111,19 @@ def build(outline):
                 elements.append(section(plain("\n"), bold(name), plain("\n")))
         elif raw.lstrip().startswith("- "):
             indent = 1 if raw.startswith("  ") else 0
-            add_item(indent, raw.lstrip()[2:].strip())
+            text = raw.lstrip()[2:].strip()
+            if indent == 0:
+                level, message = check_links(section_name, text)
+                if level == "error":
+                    errors.append(message)
+                elif level:
+                    print(f"warning: {message}", file=sys.stderr)
+            add_item(indent, text)
         else:
             raise SystemExit(f"unrecognised line: {raw!r}")
     flush_header()
+    if errors:
+        raise SystemExit("\n".join(f"error: {e}" for e in errors))
     return elements, header
 
 

@@ -46,7 +46,8 @@ Optional date argument: `$ARGUMENTS`
 
 ## Steps
 
-Steps 2, 3 and 4 are independent and should be run together. Step 5 filters, Step 6 groups and
+Steps 2, 3 and 4 are independent and should be run together. Step 4b links each candidate to its
+Slack thread and Linear project. Step 5 filters, Step 6 groups and
 writes, Step 7 posts. **Do not end the turn until Step 7 has posted or you have decided there is
 nothing to post.** Never hand work to a background subagent in this skill: a routine run (`claude -p`)
 that ends its turn while an agent is still working is killed after 600s, the post is lost, and the
@@ -148,6 +149,44 @@ and 4 while it runs; do not finish the turn before its result is in.
 - For every `search.messages` query, including dedup searches, check `ok` and fetch pages `1` through `messages.paging.pages`; `count=100` is a page size, not a total limit. Combine matches before filtering or grouping.
 - Group by thread (`thread_ts` in the permalink); fetch `conversations.replies` for threads where I wrote more than a one-liner, to get the question, the alternatives and the outcome. Follow `response_metadata.next_cursor` until empty and combine every page before summarising.
 - Keep only threads where I contributed analysis or made a call (customer investigations, technical decisions, release scope, ownership). Drop announcements, review requests, assignments, meetings, chit-chat, and my own OFT posts.
+- **Keep every candidate thread's permalink** in `$SCRATCH/threads.txt` (one line: permalink, channel, one-line topic). Use the search match's `permalink` and point it at the thread root: when it carries `?thread_ts=`, that query string is the thread; for a root message the plain permalink is enough. Step 4b and the outline need these.
+
+### 4b. Find the thread and Linear project behind every bullet
+
+A bullet that came from a PR or a session often has a Slack thread behind it: the customer
+question that prompted it, the review discussion, the release call. Link it. For each candidate
+bullet, before writing:
+
+- Reuse `threads.txt` and any `slack.com/archives/...` permalink in the session digest's `refs:`
+  line or in the PR body.
+- Otherwise run one `search.messages` query for the strongest handle: the PR URL
+  (`github.com/<owner>/<repo>/pull/<n>`), the customer or company name, the Linear key, or the
+  feature name, bounded `after:<TARGET_ISO minus 8 days> before:<NEXT_ISO>`. Do not restrict it to
+  `from:me`: the thread that prompted the work is often someone else's.
+- Keep a thread only when it is clearly about this piece of work (same PR, same customer ask,
+  same decision). One best thread per bullet; two only when they are different stories (the
+  customer ask and the internal decision).
+- Anything the bullet says was **prompted by**, **agreed with**, **asked by** or **decided in**
+  a conversation names that conversation, so it must carry its `Thread` link. If the search
+  finds nothing, rephrase the bullet so it does not refer to a conversation the reader cannot open.
+
+Then find the Linear project the work belongs to. `$LINEAR_API_KEY` goes in the `Authorization`
+header with no `Bearer` prefix:
+
+```bash
+linear() { curl -s https://api.linear.app/graphql --header "Authorization: $LINEAR_API_KEY" \
+  --header 'Content-Type: application/json' --data "$1"; }
+# issue key from the PR body, branch, commits or digest refs -> its project
+linear '{"query":"query($id:String!){issue(id:$id){identifier url project{name url}}}","variables":{"id":"AND-2300"}}'
+# no key: search issues by feature or customer name, or projects by name
+linear '{"query":"query($q:String!){searchIssues(term:$q,first:5){nodes{identifier url project{name url}}}}","variables":{"q":"Reader View reflow"}}'
+linear '{"query":"query($q:String!){projects(first:5,filter:{name:{containsIgnoreCase:$q}}){nodes{name url state}}}","variables":{"q":"iLovePDF"}}'
+```
+
+- Link the **project** when the work belongs to one; link the **issue** only when it has no
+  project. Never link generic catch-all projects (backlog, maintenance) that tell the reader nothing.
+- Keep a match only when it is clearly this work (same issue key, or the issue title matches the
+  PR or thread). Never guess a key; see `~/.claude/docs/linear-keys.md`.
 
 ### 5. Dedup and filter
 
@@ -189,6 +228,7 @@ timings, sizes, percentages).
 - No mechanism, file names, or repro steps on the bullet line; the PR carries them.
 - Mark open, non-draft, unmerged PRs with bold **RTR** after the link.
 - Never show PR numbers. Links are words: `PR`, or a one- or two-word summary per PR when a bullet has several, and `Thread` for a related Slack thread. See the link conventions under Block Kit structure.
+- **Every bullet in `Discussions` ends with a `Thread` link**, and so does any bullet that mentions a conversation ("prompted by iLovePDF's questions", "Erhard agreed", "decided with QA"). Any bullet whose work belongs to a Linear project (or, failing that, an issue) also gets a `Linear` link (Step 4b). The builder rejects a `Discussions` bullet with no thread and warns on any bullet with no link at all; resolve each warning by finding the thread (Step 4b) or confirming there is none.
 
 **Sub-bullets** (`indent: 1`) are for a second layer of signal only:
 - a finding from a session (root cause, benchmark result, "turned out X had already built this");
@@ -233,6 +273,9 @@ Out for yesterday:
 ## Release 11.7.0
 - Backported the five fixes queued for 11.7.0 onto the release branch and handed a new draft to QA [PR](https://github.com/PSPDFKit/PSPDFKit/pull/58726) · [Thread](https://pspdfkit.slack.com/archives/C0C37TMJJ6A/p1790159475183769?thread_ts=1790095447.022169)
 
+## Android SDK
+- Added Reader View reflow callbacks and fixed five reflow bugs, prompted by iLovePDF's upgrade questions [PR](https://github.com/PSPDFKit/PSPDFKit/pull/62455) **RTR** · [Linear](https://linear.app/nutrient/project/ilovepdf-mobile-asks-68fc8bcc53ce)
+
 ## Sepia page appearance
 - Reworked the sepia tone to match iOS's measured tone curve; paper colour now matches the iOS app [PR](https://github.com/PSPDFKit/PSPDFKit/pull/58678)
   - Two variants sit on the branch to test before deciding: two-pass render with a new core flag, or a single pass with no core change
@@ -255,8 +298,9 @@ Conventions the outline must follow:
 - **Never print PR numbers** (`#58726`, `ansible#96`): they mean nothing to the reader.
 - One PR on a bullet: label it `PR`.
 - Several PRs on a bullet: label each with a one- or two-word summary of what that PR does (`Draft fix`, `Pi proposals`, `Replay fix`, `Version labels`), never `PR 1`/`PR 2` or the repo name.
-- A related Slack thread: label it `Thread`, whatever channel it is in.
-- Separate links with ` · ` (space, middle dot, space). PR links come first, then `Thread`.
+- A related Slack thread: label it `Thread`, whatever channel it is in. Use the thread root's permalink (keep `?thread_ts=` when the permalink has one). Never link my self-DM.
+- The related Linear project (or issue when there is no project): label it `Linear`. At most one per bullet.
+- Separate links with ` · ` (space, middle dot, space). Order: PR links, then `Thread`, then `Linear`.
 - One **RTR** at the end only if every PR is open, non-draft and unmerged. For mixed sets, put **RTR** immediately after each qualifying PR's link.
 - No emoji.
 
@@ -266,6 +310,7 @@ Conventions the outline must follow:
   curl -s https://slack.com/api/chat.postMessage --header "Authorization: Bearer $SLACK_API_TOKEN_OFT" --header "Content-Type: application/json; charset=utf-8" --data @"$SCRATCH/oft.json"
   ```
   Use `--header`, not `-H`, and check `"ok": true` in the response.
+- Before posting, read the builder's stderr: an error means a `Discussions` bullet lacks its thread; a warning means a bullet has no link. Fix the outline or confirm there is no related thread.
 - Confirm to the user that it was posted and include the `--preview` text in the reply so the routine log shows what went out.
 - If nothing meets the bar, post nothing and say so.
 
@@ -280,4 +325,5 @@ Conventions the outline must follow:
 7. **Don't use the `slack` CLI or Node helper scripts.** curl + `SLACK_API_TOKEN_OFT` + Block Kit JSON only.
 8. **Don't put a date in the header.**
 9. **Don't guess weekday names.** Every day name in the post comes from `date`; a wrong day name in the header is the most visible mistake possible.
-10. **Slack search results HTML-escape `&`** ("Out for Tuesday &amp; Wednesday"). Match on the timestamp or unescape before comparing when looking up an earlier post (for example to `chat.update` it).
+10. **Don't summarise a conversation without linking it.** Discussions bullets and any "prompted by / agreed / decided" bullet need a `Thread` link, and work that belongs to a Linear project needs a `Linear` link (Step 4b); a reader who wants the context must be one click from it.
+11. **Slack search results HTML-escape `&`** ("Out for Tuesday &amp; Wednesday"). Match on the timestamp or unescape before comparing when looking up an earlier post (for example to `chat.update` it).
