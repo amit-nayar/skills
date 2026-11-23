@@ -133,9 +133,9 @@ that exist only locally.
 git -C "$P" push origin <branch>
 ```
 
-Then reply to each comment you addressed, in the user's voice (use the `myvoice` skill
-if available): short, says what changed, references the commit SHA. Questions you
-couldn't answer with code get a proposed reply shown to the user first, not posted.
+Then reply to each comment you addressed. Keep it short, say what changed and link
+the fixing commit. Questions you couldn't answer with code get a proposed reply
+shown to the user first, not posted.
 
 - Inline comment: `gh api repos/O/R/pulls/N/comments/<top-level-comment-id>/replies -f body=...`
   (reply to the thread's **top** comment id, found by following `in_reply_to_id` from a

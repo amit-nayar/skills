@@ -109,7 +109,7 @@ Don't restack `upstack` PRs either (that force-pushes): list them in the post as
 
 ## 5. Reply on GitHub
 
-In my voice (`myvoice` skill): short, says what changed and why, names the commit SHA. For
+Keep replies short, say what changed and why, and link the fixing commit. For
 `replied`, give the evidence in a sentence or two. Never promise future work on my behalf
 ("I'll add…"); state what's missing instead. Don't resolve threads.
 
