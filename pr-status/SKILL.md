@@ -15,7 +15,7 @@ It does the work of `review-sweep` (`~/dev/me/skills/review-sweep/SKILL.md`: ver
 fix in a throwaway worktree, push without force, reply, resolve bot threads only), so read that
 skill and follow its steps 1 to 5 with these differences:
 
-- Gather only PRs updated in the last 3 weeks: `gather.py --since-days 21` in step 1.
+- Gather only PRs updated in the last week: `gather.py --since-days 7` in step 1.
 - No Slack post (skip step 6). Put what you fixed, pushed back on, resolved and left for me
   (`needs-amit`, with drafted replies) in the reply, before the rundown.
 - Work one PR at a time, inline, and never push to a release branch.
