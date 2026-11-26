@@ -10,7 +10,6 @@ Personal agent skills and command wrappers.
 
 ## Current skills
 
-- `address-review`
 - `analyze`
 - `git-spice`
 - `grill-me`

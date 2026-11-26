@@ -1,12 +1,22 @@
 ---
 name: review-sweep
-description: Sweep all my open and draft PRs for review feedback I haven't answered, check each point is actually correct, fix and push the ones that are, reply on GitHub, and post a summary of every change to my Slack DM. Works in throwaway worktrees so no clone I'm using is touched. Runs every evening at 20:00 via launchd; run /review-sweep any time.
+description: Sweep all my open and draft PRs for review feedback I haven't answered, check each point is actually correct, fix and push the ones that are, reply on GitHub, and post a summary of every change to my Slack DM. Also handles one PR, review or comment URL ("address review", "fix review comments", "address this comment" with a github.com pull request link). Works in throwaway worktrees so no clone I'm using is touched. Runs every evening at 20:00 via launchd; run /review-sweep any time.
 ---
 
 # Review sweep
 
-Unattended version of `address-review`, across every open PR of mine at once. The reviewer is
+Addresses review feedback across every open PR of mine at once, unattended. The reviewer is
 not always right, the code-review bot least of all: **verify each point before changing code.**
+
+## One PR or URL
+
+When I give a `github.com/.../pull/N` URL (optionally `#pullrequestreview-…`, `#discussion_r…`
+or `#issuecomment-…`) instead of asking for the sweep, run the same steps for that PR only:
+run `gather.py`, keep the entry whose PR matches, and with a fragment keep only the item whose
+`url` ends with it. If gather lists nothing for it (already answered, or not my PR), read that
+feedback directly with `gh api` instead. Skip step 6: print the report in the reply, and show
+any `needs-amit` draft replies there. Never force-push, here or in the sweep. Resolve threads by
+the rule in step 5.
 
 **Do not end the turn until the Slack post has gone out** (or there was nothing to post, see
 step 6). No background agents: a routine run that ends with one still running is killed and
@@ -22,7 +32,7 @@ python3 ~/dev/me/skills/review-sweep/scripts/gather.py > "$SCRATCH/sweep.json"  
 
 `SCRATCH` is the session scratchpad. The JSON lists only PRs with pending `items`, each one:
 `kind` (`thread` / `review` / `comment`), `key`, `reviewer`, `url`, the text, and for threads
-`path`, `line`, `outdated`, `reply_to` (the top comment id) and the whole conversation.
+`path`, `line`, `outdated`, `thread_id`, `reviewer_is_bot`, `reply_to` (the top comment id) and the whole conversation.
 `previous` is what an earlier run decided for the same key (it only matches if nobody has
 spoken since). `upstack` lists open PRs based on this PR's branch. If `complete` is false, say
 so at the top of the post.
@@ -60,7 +70,7 @@ Never check out, stash or reset any clone I work in. Use a detached worktree out
 (so `work-status` and `cleanup-branches` never see it):
 
 ```bash
-~/dev/me/skills/address-review/find-pr-checkout.sh OWNER/REPO <branch>   # first line's path = $CLONE
+~/dev/me/skills/review-sweep/scripts/find-pr-checkout.sh OWNER/REPO <branch>   # first line's path = $CLONE
 git -C "$CLONE" fetch origin <branch>
 ```
 
@@ -111,7 +121,18 @@ Don't restack `upstack` PRs either (that force-pushes): list them in the post as
 
 Keep replies short, say what changed and why, and link the fixing commit. For
 `replied`, give the evidence in a sentence or two. Never promise future work on my behalf
-("I'll add…"); state what's missing instead. Don't resolve threads.
+("I'll add…"); state what's missing instead.
+
+**Resolving threads:** resolve a thread after you answered it (`fixed` or `replied`) only when
+its item has `reviewer_is_bot: true`, meaning the top comment came from a bot. Never resolve a
+thread a person started, `needs-amit` and `skipped` threads of any author, or a review body or
+top-level comment (they have no thread):
+
+```bash
+gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -f t="<thread_id>"
+```
+
+Say in the post which threads you resolved.
 
 - Thread: `gh api repos/O/R/pulls/N/comments/<reply_to>/replies -f body=...`
 - Review body or top-level comment: `gh pr comment N -R O/R --body ...`, quoting the point.

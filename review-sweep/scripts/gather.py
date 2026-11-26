@@ -30,7 +30,7 @@ PR_QUERY = """query($owner: String!, $name: String!, $n: Int!) { repository(owne
   pullRequest(number: $n) {
     number title url isDraft isCrossRepository headRefName headRefOid baseRefName
     reviewThreads(first: 100) { nodes { id isResolved isOutdated path line
-      comments(first: 50) { nodes { databaseId author { login } body createdAt url } } } }
+      comments(first: 50) { nodes { databaseId author { login __typename } body createdAt url } } } }
     reviews(last: 50) { nodes { databaseId state body author { login } submittedAt url } }
     comments(last: 100) { nodes { databaseId author { login } body createdAt url } } } } }"""
 
@@ -64,6 +64,8 @@ def pending_items(pr, me):
             continue
         items.append({
             "kind": "thread", "key": f"thread:{cs[-1]['databaseId']}",
+            "thread_id": t["id"],  # GraphQL id, for resolveReviewThread
+            "reviewer_is_bot": (cs[0].get("author") or {}).get("__typename") == "Bot",
             "reply_to": cs[0]["databaseId"],  # replies go to the thread's top comment
             "path": t["path"], "line": t["line"], "outdated": t["isOutdated"],
             "reviewer": login_of(cs[0]), "url": cs[-1]["url"],
