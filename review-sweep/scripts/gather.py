@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """List review feedback on my open PRs (drafts included) that I haven't answered yet, as JSON.
 
-Read-only. Usage: gather.py [--all]   (--all: include PRs outside the Nutrient GitHub orgs)
+Read-only. Usage: gather.py [--all] [--since-days N]
+(--all: include PRs outside the Nutrient GitHub orgs; --since-days: only PRs updated in the last N days)
 
 An item is pending when someone else spoke last:
 - an unresolved review thread whose last comment isn't mine
@@ -111,12 +112,15 @@ def pr_feedback(p, me, state):
 
 
 def main():
-    include_all = "--all" in sys.argv[1:]
+    args = sys.argv[1:]
+    include_all = "--all" in args
+    since_days = int(args[args.index("--since-days") + 1]) if "--since-days" in args else None
     me = run(["gh", "api", "user", "-q", ".login"])
     raw = run(["gh", "search", "prs", "--author", "@me", "--state", "open", "--limit", "100",
-               "--json", "number,repository"])
+               "--json", "number,repository,updatedAt"])
     prs = [p for p in json.loads(raw or "[]")
-           if include_all or p["repository"]["nameWithOwner"].split("/")[0].lower() in NUTRIENT_ORGS]
+           if (include_all or p["repository"]["nameWithOwner"].split("/")[0].lower() in NUTRIENT_ORGS)
+           and (since_days is None or age_days(p["updatedAt"]) <= since_days)]
     try:
         state = json.loads(STATE.read_text())
     except (OSError, ValueError):
