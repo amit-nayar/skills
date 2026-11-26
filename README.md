@@ -16,6 +16,7 @@ Personal agent skills and command wrappers.
 - `handoff`
 - `oft`
 - `pr-private-review`
+- `pr-status`
 - `retrace`
 - `review-sweep`
 - `session-report`
